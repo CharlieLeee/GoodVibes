@@ -12,6 +12,12 @@ import EditTaskModal from "@/components/EditTaskModal"; // Import the modal
 // Define a key for local storage
 const LOCAL_STORAGE_KEY = "tasksAppData";
 const EXPANDED_TASKS_LOCAL_STORAGE_KEY = "expandedTaskIds_tasksAppData"; // New key
+const GOOGLE_ACCESS_TOKEN_KEY = "googleAccessToken_tasksAppData"; // New key
+const GOOGLE_SIGN_IN_STATUS_KEY = "googleSignInStatus_tasksAppData"; // New key
+
+// Placeholder for Google Client ID - REPLACE WITH YOUR ACTUAL CLIENT ID
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+const GOOGLE_API_SCOPE = "https://www.googleapis.com/auth/tasks";
 
 // Initial tasks data - this will now be managed in this component
 const initialTasks: Task[] = [
@@ -84,9 +90,60 @@ export default function Home() {
 	const [activeTab, setActiveTab] = useState<'todo' | 'calendar'>('todo');
   const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]); // State for expanded task IDs
 
+  // Google Auth State
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [googleTokenClient, setGoogleTokenClient] = useState<any>(null);
+
+
 	// Set hasMounted to true only on the client-side after initial render
 	useEffect(() => {
 		setHasMounted(true);
+
+    // Load Google Identity Services script
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      // Initialize Google Token Client once script is loaded
+      if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID!,
+          scope: GOOGLE_API_SCOPE,
+          callback: (tokenResponse) => {
+            if (tokenResponse && tokenResponse.access_token) {
+              setGoogleAccessToken(tokenResponse.access_token);
+              setIsGoogleSignedIn(true);
+              // Store token and sign-in status in localStorage
+              localStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, tokenResponse.access_token);
+              localStorage.setItem(GOOGLE_SIGN_IN_STATUS_KEY, "true");
+              console.log("Google Access Token:", tokenResponse.access_token);
+            } else {
+              console.error("Error obtaining Google access token:", tokenResponse);
+              setIsGoogleSignedIn(false);
+              setGoogleAccessToken(null);
+              // Clear token and sign-in status from localStorage
+              localStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
+              localStorage.removeItem(GOOGLE_SIGN_IN_STATUS_KEY);
+            }
+          },
+        });
+        setGoogleTokenClient(client);
+      } else {
+        console.error("Google Identity Services library not loaded correctly.");
+      }
+    };
+    script.onerror = () => {
+      console.error("Failed to load Google Identity Services script.");
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      // Clean up script if component unmounts
+      document.body.removeChild(script);
+    };
 	}, []);
 
 	// Effect to load tasks and expanded state from local storage once the component has mounted
@@ -110,6 +167,16 @@ export default function Home() {
         } catch (error) {
           console.error("Error parsing expanded task IDs from local storage:", error);
         }
+      }
+
+      // Load Google Auth state from localStorage
+      const storedGoogleToken = localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY);
+      const storedGoogleSignInStatus = localStorage.getItem(GOOGLE_SIGN_IN_STATUS_KEY);
+
+      if (storedGoogleToken && storedGoogleSignInStatus === "true") {
+        setGoogleAccessToken(storedGoogleToken);
+        setIsGoogleSignedIn(true);
+        console.log("Restored Google session from localStorage");
       }
 		}
 	}, [hasMounted]); // Depend on hasMounted
@@ -236,6 +303,36 @@ export default function Home() {
 		);
 	};
 
+  // Google Sign-In Handler
+  const handleGoogleSignIn = () => {
+    if (googleTokenClient) {
+      googleTokenClient.requestAccessToken();
+    } else {
+      console.error("Google Token Client not initialized.");
+      // Optionally, try to re-initialize or prompt user to reload
+    }
+  };
+
+  // Google Sign-Out Handler
+  const handleGoogleSignOut = () => {
+    if (googleAccessToken) {
+      window.google.accounts.oauth2.revoke(googleAccessToken, () => {
+        setGoogleAccessToken(null);
+        setIsGoogleSignedIn(false);
+        // Clear token and sign-in status from localStorage
+        localStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
+        localStorage.removeItem(GOOGLE_SIGN_IN_STATUS_KEY);
+        console.log("Google token revoked and session cleared from localStorage.");
+      });
+    } else {
+      // If there's no access token in state, still ensure localStorage is clear
+      localStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
+      localStorage.removeItem(GOOGLE_SIGN_IN_STATUS_KEY);
+      setIsGoogleSignedIn(false); // Ensure UI reflects signed-out state
+    }
+  };
+
+
 	// Conditional rendering for TaskList and CalendarView to avoid rendering with potentially mismatched state before client hydration
 	if (!hasMounted) {
 		// Optionally render a loading state or null during SSR / pre-hydration to avoid mismatch
@@ -250,21 +347,41 @@ export default function Home() {
 			<Header />
 			<main className="flex flex-1 p-6 space-x-6 overflow-y-auto">
 				<div className="flex-1 flex flex-col space-y-6">
-					{/* Tab Navigation */}
-					<div className="flex border-b">
-						<button
-							className={`py-2 px-4 font-semibold ${activeTab === "todo" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`}
-							onClick={() => setActiveTab("todo")}
-						>
-							To-Do List
-						</button>
-						<button
-							className={`py-2 px-4 font-semibold ${activeTab === "calendar" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`}
-							onClick={() => setActiveTab("calendar")}
-						>
-							Calendar
-						</button>
-					</div>
+					{/* Tab Navigation & Google Sign-In */}
+					<div className="flex justify-between items-center border-b">
+            <div>
+              <button
+                className={`py-2 px-4 font-semibold ${activeTab === "todo" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`}
+                onClick={() => setActiveTab("todo")}
+              >
+                To-Do List
+              </button>
+              <button
+                className={`py-2 px-4 font-semibold ${activeTab === "calendar" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`}
+                onClick={() => setActiveTab("calendar")}
+              >
+                Calendar
+              </button>
+            </div>
+            <div>
+              {isGoogleSignedIn ? (
+                <button
+                  onClick={handleGoogleSignOut}
+                  className="py-2 px-4 bg-red-500 text-white rounded hover:bg-red-600"
+                >
+                  Sign Out from Google
+                </button>
+              ) : (
+                <button
+                  onClick={handleGoogleSignIn}
+                  disabled={!googleTokenClient}
+                  className="py-2 px-4 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+                >
+                  Sign In with Google
+                </button>
+              )}
+            </div>
+          </div>
 
 					{/* Conditional Rendering based on activeTab */}
 					{activeTab === "todo" && (

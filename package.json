@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "date-fns": "^4.1.0",
+    "googleapis": "^148.0.0",
     "next": "15.3.2",
     "openai": "^4.100.0",
     "react": "^19.0.0",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@types/google.accounts": "^0.0.16",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-big-calendar": "^1.16.1",
