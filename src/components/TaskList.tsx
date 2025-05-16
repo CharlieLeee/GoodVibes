@@ -78,12 +78,28 @@ const initialTasksSample: Task[] = [
 ];
 
 interface TaskListProps {
-  tasks: Task[]; // Changed from defaultTasks to tasks
-  onToggleSubtaskCompletion: (taskId: string, subtaskId: string) => void;
-  onToggleTaskCompletion: (taskId: string) => void; // Added for top-level task completion
+  tasks: Task[];
+  toggleSubtaskCompletion: (taskId: string, subtaskId: string) => void;
+  toggleTaskCompletion: (taskId: string) => void;
+  onEditTask: (taskId: string) => void;
+  onDeleteTask: (taskId: string) => void;
+  expandedTaskIds: string[]; // Add prop for expanded task IDs
+  onToggleTaskExpansion: (taskId: string) => void; // Add prop for toggling expansion
 }
 
-const TaskList: React.FC<TaskListProps> = ({ tasks, onToggleSubtaskCompletion, onToggleTaskCompletion }) => {
+const TaskList: React.FC<TaskListProps> = ({ 
+  tasks, 
+  toggleSubtaskCompletion, 
+  toggleTaskCompletion, 
+  onEditTask, 
+  onDeleteTask, 
+  expandedTaskIds, 
+  onToggleTaskExpansion 
+}) => {
+  if (!tasks || tasks.length === 0) {
+    return <div className="text-gray-500">No tasks available. Create your first task!</div>;
+  }
+
   return (
     <div className="bg-white shadow-md rounded-lg p-6">
       <h2 className="text-xl font-semibold mb-4">Your Tasks</h2>
@@ -92,8 +108,12 @@ const TaskList: React.FC<TaskListProps> = ({ tasks, onToggleSubtaskCompletion, o
           <TaskItem 
             key={task.id} 
             task={task} 
-            toggleSubtaskCompletion={onToggleSubtaskCompletion} 
-            toggleTaskCompletion={onToggleTaskCompletion} // Pass down the new handler
+            toggleSubtaskCompletion={toggleSubtaskCompletion} 
+            toggleTaskCompletion={toggleTaskCompletion}
+            onEditTask={onEditTask}
+            onDeleteTask={onDeleteTask}
+            isExpanded={expandedTaskIds.includes(task.id)} // Pass isExpanded state
+            onToggleExpansion={() => onToggleTaskExpansion(task.id)} // Pass toggle handler
           />
         ))}
       </div>

@@ -7,11 +7,23 @@ import SubtaskItem from './SubtaskItem';
 interface TaskItemProps {
   task: Task;
   toggleSubtaskCompletion: (taskId: string, subtaskId: string) => void;
-  toggleTaskCompletion: (taskId: string) => void; // Added prop
+  toggleTaskCompletion: (taskId: string) => void;
+  onEditTask: (taskId: string) => void;
+  onDeleteTask: (taskId: string) => void;
+  isExpanded: boolean; // Add prop for expansion state
+  onToggleExpansion: () => void; // Add prop for toggling expansion
 }
 
-const TaskItem: React.FC<TaskItemProps> = ({ task, toggleSubtaskCompletion, toggleTaskCompletion }) => {
-  const [showSubtasks, setShowSubtasks] = useState(false);
+const TaskItem: React.FC<TaskItemProps> = ({ 
+  task, 
+  toggleSubtaskCompletion, 
+  toggleTaskCompletion, 
+  onEditTask, 
+  onDeleteTask, 
+  isExpanded, 
+  onToggleExpansion 
+}) => {
+  const [showMenu, setShowMenu] = useState(false); // State for dropdown menu
 
   const getPriorityClasses = (priority: Task['priority']) => {
     switch (priority) {
@@ -24,6 +36,19 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, toggleSubtaskCompletion, togg
       default:
         return 'bg-gray-100 text-gray-700';
     }
+  };
+
+  const handleEdit = () => {
+    onEditTask(task.id);
+    setShowMenu(false); // Close menu after clicking
+  };
+
+  const handleDelete = () => {
+    // Consider adding a confirmation dialog here if desired
+    // if (window.confirm("Are you sure you want to delete this task?")) {
+    onDeleteTask(task.id);
+    // }
+    setShowMenu(false); // Close menu after clicking
   };
 
   return (
@@ -40,43 +65,64 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, toggleSubtaskCompletion, togg
             />
           )}
           <div className={task.subtasks && task.subtasks.length > 0 ? "w-full" : "w-full"}> {/* Ensure title takes full width available */}
-            <h3 className={`text-lg font-semibold text-gray-800 ${task.status === 'Completed' ? 'line-through text-gray-400' : ''}`}>{task.title}</h3>
-            <p className={`text-sm text-gray-500 mb-2 ${task.status === 'Completed' ? 'line-through' : ''}`}>{task.description}</p>
+            <h3 className={`text-lg font-semibold text-gray-800 ${task.status === 'Completed' ? 'line-through text-gray-500' : 'text-gray-900'}`}>{task.title}</h3>
+            <p className={`text-sm text-gray-600 mb-2 ${task.status === 'Completed' ? 'line-through text-gray-400' : 'text-gray-700'}`}>{task.description}</p>
             <div className="flex items-center space-x-2 mb-2 flex-wrap">
               <span
-                className={`px-2 py-0.5 text-xs font-medium rounded-full ${getPriorityClasses(task.priority)} ${task.status === 'Completed' ? 'opacity-50' : ''}`}
+                className={`px-2 py-0.5 text-xs font-medium rounded-full ${getPriorityClasses(task.priority)} ${task.status === 'Completed' ? 'opacity-60' : ''}`}
               >
                 {task.priority}
               </span>
-              <span className={`px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700 ${task.status === 'Completed' ? 'opacity-50' : ''}`}>
+              <span className={`px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800 ${task.status === 'Completed' ? 'opacity-60' : ''}`}>
                 {task.status}
               </span>
               {task.tags.map(tag => (
-                <span key={tag} className={`px-2 py-0.5 text-xs font-medium rounded-full bg-gray-200 text-gray-700 ${task.status === 'Completed' ? 'opacity-50' : ''}`}>
+                <span key={tag} className={`px-2 py-0.5 text-xs font-medium rounded-full bg-gray-200 text-gray-800 ${task.status === 'Completed' ? 'opacity-60' : ''}`}>
                   {tag}
                 </span>
               ))}
             </div>
-            <div className={`text-xs text-gray-400 space-x-4 mb-1 ${task.status === 'Completed' ? 'line-through' : ''}`}>
+            <div className={`text-xs text-gray-500 space-x-4 mb-1 ${task.status === 'Completed' ? 'line-through' : 'text-gray-600'}`}>
               {task.dueDate && <span>Due: {task.dueDate}</span>}
               {task.createdDate && <span>Created: {task.createdDate}</span>}
             </div>
           </div>
         </div>
-        <button className="text-gray-400 hover:text-gray-600 ml-2 flex-shrink-0">
-          {/* Placeholder for More Options Icon (e.g., three dots) */}
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-          </svg>
-        </button>
+        <div className="relative ml-2 flex-shrink-0"> {/* Added relative positioning for the dropdown */}
+          <button 
+            onClick={() => setShowMenu(!showMenu)} 
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+            </svg>
+          </button>
+          {showMenu && (
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 py-1">
+              <button
+                onClick={handleEdit}
+                className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                Edit Task
+              </button>
+              <button
+                onClick={handleDelete} // Add delete handler
+                className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                Delete Task
+              </button>
+              {/* More options can be added here */}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="mt-3">
         <div className="flex justify-between items-center text-sm mb-1">
-          <p className="text-gray-600">Progress: {task.subtasks.length > 0 ? `${task.subtasks.filter(st => st.completed).length} of ${task.subtasks.length} subtasks` : 'No subtasks'}</p>
-          <span className="font-medium text-gray-700">{task.progress}%</span>
+          <p className="text-gray-700">Progress: {task.subtasks.length > 0 ? `${task.subtasks.filter(st => st.completed).length} of ${task.subtasks.length} subtasks` : 'No subtasks'}</p>
+          <span className="font-medium text-gray-800">{task.progress}%</span>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
+        <div className="w-full bg-gray-300 rounded-full h-2 mb-3">
           <div
             className="bg-blue-600 h-2 rounded-full"
             style={{ width: `${task.progress}%` }}
@@ -87,15 +133,15 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, toggleSubtaskCompletion, togg
       {task.subtasks && task.subtasks.length > 0 && (
         <div>
           <button
-            onClick={() => setShowSubtasks(!showSubtasks)}
-            className="text-sm text-blue-600 hover:text-blue-800 flex items-center w-full text-left mb-2"
+            onClick={onToggleExpansion} // Use the passed-in handler
+            className="text-sm text-blue-700 hover:text-blue-900 flex items-center w-full text-left mb-2"
           >
-            {showSubtasks ? 'Hide Subtasks' : 'View Subtasks'}
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-4 h-4 ml-1 transform transition-transform ${showSubtasks ? 'rotate-180' : ''}`}>
+            {isExpanded ? 'Hide Subtasks' : 'View Subtasks'} {/* Reflect isExpanded state */}
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-4 h-4 ml-1 transform transition-transform ${isExpanded ? 'rotate-180' : ''}`}> {/* Reflect isExpanded state */}
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
             </svg>
           </button>
-          {showSubtasks && (
+          {isExpanded && ( // Reflect isExpanded state
             <div className="space-y-2 pl-4 border-l-2 border-gray-200 ml-1">
               {task.subtasks.map(subtask => (
                 <SubtaskItem 

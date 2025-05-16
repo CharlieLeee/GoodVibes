@@ -20,7 +20,7 @@ const supportMessages: SupportMessage[] = [
 const SupportPanel: React.FC = () => {
   return (
     <div className="bg-white shadow-md rounded-lg p-6">
-      <h2 className="text-xl font-semibold mb-4">Support & Motivation</h2>
+      <h2 className="text-xl font-semibold mb-4 text-gray-800">Support & Motivation</h2>
       <div className="space-y-3">
         {supportMessages.map(message => (
           <div key={message.id} className={`p-3 rounded-lg flex items-center ${message.colorClass}`}>
