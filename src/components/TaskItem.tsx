@@ -7,9 +7,10 @@ import SubtaskItem from './SubtaskItem';
 interface TaskItemProps {
   task: Task;
   toggleSubtaskCompletion: (taskId: string, subtaskId: string) => void;
+  toggleTaskCompletion: (taskId: string) => void; // Added prop
 }
 
-const TaskItem: React.FC<TaskItemProps> = ({ task, toggleSubtaskCompletion }) => {
+const TaskItem: React.FC<TaskItemProps> = ({ task, toggleSubtaskCompletion, toggleTaskCompletion }) => {
   const [showSubtasks, setShowSubtasks] = useState(false);
 
   const getPriorityClasses = (priority: Task['priority']) => {
@@ -28,30 +29,41 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, toggleSubtaskCompletion }) =>
   return (
     <div className="border border-gray-200 rounded-lg p-4">
       <div className="flex justify-between items-start">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-800">{task.title}</h3>
-          <p className="text-sm text-gray-500 mb-2">{task.description}</p>
-          <div className="flex items-center space-x-2 mb-2 flex-wrap">
-            <span
-              className={`px-2 py-0.5 text-xs font-medium rounded-full ${getPriorityClasses(task.priority)}`}
-            >
-              {task.priority}
-            </span>
-            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
-              {task.status}
-            </span>
-            {task.tags.map(tag => (
-              <span key={tag} className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-200 text-gray-700">
-                {tag}
+        <div className="flex items-start flex-grow">
+          {/* Checkbox for tasks without subtasks */}
+          {(!task.subtasks || task.subtasks.length === 0) && (
+            <input
+              type="checkbox"
+              checked={task.status === 'Completed'}
+              onChange={() => toggleTaskCompletion(task.id)}
+              className="mr-3 mt-1 h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 self-start"
+            />
+          )}
+          <div className={task.subtasks && task.subtasks.length > 0 ? "w-full" : "w-full"}> {/* Ensure title takes full width available */}
+            <h3 className={`text-lg font-semibold text-gray-800 ${task.status === 'Completed' ? 'line-through text-gray-400' : ''}`}>{task.title}</h3>
+            <p className={`text-sm text-gray-500 mb-2 ${task.status === 'Completed' ? 'line-through' : ''}`}>{task.description}</p>
+            <div className="flex items-center space-x-2 mb-2 flex-wrap">
+              <span
+                className={`px-2 py-0.5 text-xs font-medium rounded-full ${getPriorityClasses(task.priority)} ${task.status === 'Completed' ? 'opacity-50' : ''}`}
+              >
+                {task.priority}
               </span>
-            ))}
-          </div>
-          <div className="text-xs text-gray-400 space-x-4 mb-1">
-            <span>{task.dueDate}</span>
-            <span>{task.createdDate}</span>
+              <span className={`px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700 ${task.status === 'Completed' ? 'opacity-50' : ''}`}>
+                {task.status}
+              </span>
+              {task.tags.map(tag => (
+                <span key={tag} className={`px-2 py-0.5 text-xs font-medium rounded-full bg-gray-200 text-gray-700 ${task.status === 'Completed' ? 'opacity-50' : ''}`}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+            <div className={`text-xs text-gray-400 space-x-4 mb-1 ${task.status === 'Completed' ? 'line-through' : ''}`}>
+              {task.dueDate && <span>Due: {task.dueDate}</span>}
+              {task.createdDate && <span>Created: {task.createdDate}</span>}
+            </div>
           </div>
         </div>
-        <button className="text-gray-400 hover:text-gray-600">
+        <button className="text-gray-400 hover:text-gray-600 ml-2 flex-shrink-0">
           {/* Placeholder for More Options Icon (e.g., three dots) */}
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />

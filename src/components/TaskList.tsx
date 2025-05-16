@@ -8,6 +8,7 @@ export interface Subtask {
   id: string;
   name: string;
   completed: boolean;
+  dueDate?: string; // Optional due date
 }
 
 export interface Task {
@@ -17,15 +18,14 @@ export interface Task {
   priority: 'High Priority' | 'Medium Priority' | 'Low Priority';
   status: string;
   tags: string[];
-  dueDate: string;
+  dueDate?: string; // Optional due date for tasks without subtasks
   createdDate: string;
   progress: number; // e.g., 50 for 50%
   subtasks: Subtask[];
 }
 
-
 // Sample Data (replace with actual data fetching later)
-const initialTasks: Task[] = [
+const initialTasksSample: Task[] = [
   {
     id: '1',
     title: 'Create presentation for client meeting',
@@ -77,56 +77,24 @@ const initialTasks: Task[] = [
   },
 ];
 
-const TaskList: React.FC = () => {
-  const [tasks, setTasks] = React.useState<Task[]>(initialTasks);
+interface TaskListProps {
+  tasks: Task[]; // Changed from defaultTasks to tasks
+  onToggleSubtaskCompletion: (taskId: string, subtaskId: string) => void;
+  onToggleTaskCompletion: (taskId: string) => void; // Added for top-level task completion
+}
 
-  const toggleSubtaskCompletion = (taskId: string, subtaskId: string) => {
-    setTasks(prevTasks =>
-      prevTasks.map(task => {
-        if (task.id === taskId) {
-          const newSubtasks = task.subtasks.map(subtask =>
-            subtask.id === subtaskId
-              ? { ...subtask, completed: !subtask.completed }
-              : subtask
-          );
-
-          const completedCount = newSubtasks.filter(st => st.completed).length;
-          const newProgress = newSubtasks.length > 0
-            ? Math.round((completedCount / newSubtasks.length) * 100)
-            : 0;
-
-          let newStatus = task.status;
-          if (newSubtasks.length > 0 && completedCount === newSubtasks.length) {
-            newStatus = "Completed";
-          } else if (task.status === "Completed" && completedCount < newSubtasks.length) {
-            // If a subtask was unchecked, and the task was previously completed,
-            // revert to "In Progress" or its original non-completed status.
-            // For simplicity, we'll use "In Progress".
-            // A more complex solution might involve storing the pre-completed status.
-            const originalTask = initialTasks.find(t => t.id === taskId);
-            newStatus = originalTask && originalTask.status !== "Completed" ? originalTask.status : "In Progress";
-          }
-
-
-          return {
-            ...task,
-            subtasks: newSubtasks,
-            progress: newProgress,
-            status: newStatus,
-          };
-        }
-        return task;
-      })
-    );
-  };
-
-
+const TaskList: React.FC<TaskListProps> = ({ tasks, onToggleSubtaskCompletion, onToggleTaskCompletion }) => {
   return (
     <div className="bg-white shadow-md rounded-lg p-6">
       <h2 className="text-xl font-semibold mb-4">Your Tasks</h2>
       <div className="space-y-4">
         {tasks.map(task => (
-          <TaskItem key={task.id} task={task} toggleSubtaskCompletion={toggleSubtaskCompletion} />
+          <TaskItem 
+            key={task.id} 
+            task={task} 
+            toggleSubtaskCompletion={onToggleSubtaskCompletion} 
+            toggleTaskCompletion={onToggleTaskCompletion} // Pass down the new handler
+          />
         ))}
       </div>
     </div>
