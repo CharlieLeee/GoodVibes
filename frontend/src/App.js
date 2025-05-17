@@ -665,11 +665,29 @@ const TasksList = ({ userId }) => {
     }
   };
 
+  const priorityOrder = { high: 0, medium: 1, low: 2 };
+
   const filteredTasks = tasks.filter(task => {
     if (filter === "all") return true;
     if (filter === "active") return !task.completed;
     if (filter === "completed") return task.completed;
     return true;
+  });
+
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
+    // Completed tasks always at the end (only for 'all' filter)
+    if (filter === 'all') {
+      if (a.completed && !b.completed) return 1;
+      if (!a.completed && b.completed) return -1;
+    }
+    // Order by priority (high < medium < low)
+    const aPriority = priorityOrder[a.priority] ?? 3;
+    const bPriority = priorityOrder[b.priority] ?? 3;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    // For same priority, order by due date (earlier first)
+    const aDue = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+    const bDue = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+    return aDue - bDue;
   });
 
   return (
@@ -716,7 +734,7 @@ const TasksList = ({ userId }) => {
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-600"></div>
             <p className="mt-2 text-gray-600">Loading tasks...</p>
           </div>
-        ) : filteredTasks.length === 0 ? (
+        ) : sortedTasks.length === 0 ? (
           <div className="text-center py-10 text-gray-500">
             {filter === "all"
               ? "You don't have any tasks yet. Start by creating a new task above!"
@@ -726,7 +744,7 @@ const TasksList = ({ userId }) => {
           </div>
         ) : (
           <div>
-            {filteredTasks.map((task) => (
+            {sortedTasks.map((task) => (
               <TaskCard
                 key={task.id}
                 task={task}
