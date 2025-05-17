@@ -164,6 +164,10 @@ const TaskInput = ({ userId, setTasks }) => {
     };
     setMessages(prev => [...prev, userMessage]);
     
+    // Clear input immediately after sending
+    setTaskText("");
+    setInterimTranscript('');
+    
     setProcessing(true);
     setError("");
     
@@ -183,8 +187,6 @@ const TaskInput = ({ userId, setTasks }) => {
       setMessages(prev => [...prev, assistantMessage]);
       
       setTasks(prevTasks => [response.data, ...prevTasks]);
-      setTaskText("");
-      setInterimTranscript('');
     } catch (err) {
       console.error("Error processing task:", err);
       setError("Failed to process task. Please try again.");
@@ -598,16 +600,7 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
           </div>
           
           <div className="bg-indigo-50 p-3 rounded-md">
-            <div className="flex justify-between items-center mb-1">
-              <h4 className="text-sm font-medium text-indigo-800">Emotional Support:</h4>
-              <button
-                onClick={getNewEmotionalSupport}
-                disabled={loadingSupport}
-                className="text-xs text-indigo-600 hover:text-indigo-800"
-              >
-                {loadingSupport ? "Loading..." : "Get fresh encouragement"}
-              </button>
-            </div>
+            <h4 className="text-sm font-medium text-indigo-800 mb-1">Emotional Support:</h4>
             <p className="text-sm text-indigo-700">{emotionalSupport}</p>
           </div>
         </div>
