@@ -805,7 +805,8 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
             subtask_desc = str(subtask_item)
             subtask_deadline = None
             
-        subtask_title = subtask_item.get('title') or subtask_desc
+        # Set title based on item type - using .get only when it's a dictionary
+        subtask_title = subtask_item.get('title') if isinstance(subtask_item, dict) else subtask_desc
         subtask = Subtask(
             task_id=task.id,
             title=subtask_title,
@@ -1121,6 +1122,7 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
             f"The current date is {current_date}. Be helpful, clear, and concise. "
             "When a user describes something they need to do, consider whether it's a simple task "
             "or a complex project that needs to be broken down into steps."
+            "When you provide an answer to the user, make sure it is clear and concise. Do not generate very long responses."
         )
         
         # Use the initialize_agent approach with a simpler agent type
