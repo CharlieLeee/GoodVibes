@@ -62,6 +62,72 @@ const TaskInput = ({ userId, setTasks }) => {
   const [taskText, setTaskText] = useState("");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const recognition = useRef(null);
+
+  useEffect(() => {
+    // Initialize speech recognition
+    if (window.webkitSpeechRecognition) {
+      recognition.current = new window.webkitSpeechRecognition();
+      recognition.current.continuous = true;
+      recognition.current.interimResults = true;
+
+      recognition.current.onresult = (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        // Process interim and final results
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+            setTaskText(prevText => prevText + finalTranscript);
+            setInterimTranscript('');
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+            setInterimTranscript(interimTranscript);
+          }
+        }
+      };
+
+      recognition.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+        setError("Failed to recognize speech. Please try again.");
+        setInterimTranscript('');
+      };
+
+      recognition.current.onend = () => {
+        // Don't automatically restart
+        setIsListening(false);
+      };
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognition.current) {
+      setError("Speech recognition is not supported in your browser.");
+      return;
+    }
+
+    try {
+      if (isListening) {
+        recognition.current.stop();
+        setInterimTranscript('');
+        setIsListening(false);
+      } else {
+        setError("");
+        setInterimTranscript('');
+        recognition.current.start();
+        setIsListening(true);
+      }
+    } catch (error) {
+      console.error('Speech recognition error:', error);
+      setIsListening(false);
+      setError("Failed to toggle voice recording. Please try again.");
+      setInterimTranscript('');
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -85,6 +151,7 @@ const TaskInput = ({ userId, setTasks }) => {
       
       // Clear input
       setTaskText("");
+      setInterimTranscript('');
     } catch (err) {
       console.error("Error processing task:", err);
       setError("Failed to process task. Please try again.");
@@ -105,21 +172,64 @@ const TaskInput = ({ userId, setTasks }) => {
         </div>
       )}
       
-      <form onSubmit={handleSubmit}>
-        <textarea
-          value={taskText}
-          onChange={(e) => setTaskText(e.target.value)}
-          placeholder="Describe your task in natural language (e.g., 'Create a presentation for the marketing team by next Friday')"
-          className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
-          rows={3}
-        />
-        <button
-          type="submit"
-          disabled={processing}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition duration-300 disabled:bg-indigo-400"
-        >
-          {processing ? "Analyzing Task..." : "Create Task"}
-        </button>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="flex gap-2">
+          <div className="flex-grow relative">
+            <textarea
+              value={taskText}
+              onChange={(e) => setTaskText(e.target.value)}
+              placeholder="Describe your task in natural language (e.g., 'Create a presentation for the marketing team by next Friday')"
+              className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              rows={3}
+            />
+            {interimTranscript && (
+              <div className="absolute bottom-0 left-0 right-0 p-2 bg-gray-100 text-gray-600 italic border-t">
+                {interimTranscript}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={toggleListening}
+            className={`flex-shrink-0 p-3 rounded-md transition-colors ${
+              isListening
+                ? 'bg-red-500 hover:bg-red-600'
+                : 'bg-indigo-600 hover:bg-indigo-700'
+            }`}
+            title={isListening ? 'Stop recording' : 'Start voice input'}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-6 w-6 text-white"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+              />
+            </svg>
+          </button>
+        </div>
+        
+        <div className="flex items-center justify-between">
+          <button
+            type="submit"
+            disabled={processing}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition duration-300 disabled:bg-indigo-400"
+          >
+            {processing ? "Analyzing Task..." : "Create Task"}
+          </button>
+          
+          {isListening && (
+            <span className="text-sm text-indigo-600 animate-pulse">
+              Listening... Speak now
+            </span>
+          )}
+        </div>
       </form>
       
       <p className="text-sm text-gray-500 mt-3">

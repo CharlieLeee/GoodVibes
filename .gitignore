@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+backend/__pycache__/server.cpython-39.pyc
+frontend/package-lock.json
+frontend/yarn.lock

@@ -132,7 +132,7 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     - If a specific date is mentioned (like "June 15th"), use that as the final deadline
     - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date
     - If a relative time is mentioned (like "in 3 days"), calculate the date based on today
-    - For subtask deadlines, distribute them evenly between today and the final deadline
+    - For subtask deadlines, distribute them evenly between {current_date_str} and the final deadline
     - Always return dates in ISO format (YYYY-MM-DD)
     - If no deadline is mentioned, set deadline to null
     
@@ -160,7 +160,7 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
 
     data = {
-        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "model": "deepseek-ai/DeepSeek-R1",
         "prompt": prompt,
         "max_tokens": 1024,
         "temperature": 0.7,
@@ -246,7 +246,7 @@ async def generate_emotional_support(task_title: str, deadline: Optional[datetim
     headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
 
     data = {
-        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "model": "anthropic/claude-2",
         "prompt": prompt,
         "max_tokens": 100,
         "temperature": 0.7,
