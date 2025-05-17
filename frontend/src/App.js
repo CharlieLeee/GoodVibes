@@ -24,7 +24,7 @@ const Navigation = ({ activeTab, setActiveTab, userId }) => {
   return (
     <nav className="bg-indigo-600 text-white p-4">
       <div className="container mx-auto flex justify-between items-center">
-        <h1 className="text-xl font-bold">AI Task Assistant</h1>
+        <h1 className="text-xl font-bold">🌊 GoodVibes</h1>
         {userId && (
           <div className="flex space-x-4">
             <button

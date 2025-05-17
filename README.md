@@ -1,106 +1,120 @@
-# Here are your Instructions
+# GoodVibes - Local Development Setup
 
-# AI Task Assistant - Local Development Setup
-
-This guide provides instructions for setting up and running the AI Task Assistant application locally for development purposes.
+This guide provides instructions for setting up and running the GoodVibes application locally for development purposes.
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed on your system:
-
-* **Node.js**: [Download Node.js](https://nodejs.org/) (LTS version recommended)
-* **Yarn**: After installing Node.js, you can install Yarn by running `npm install --global yarn`
-* **Python**: [Download Python](https://www.python.org/downloads/) (Version 3.9 or higher recommended)
-* **Poetry**: [Install Poetry](https://python-poetry.org/docs/#installation) (Python dependency management)
-* **MongoDB**: [Install MongoDB Community Edition](https://www.mongodb.com/try/download/community) (Ensure the MongoDB server is running)
+Before you begin, ensure you have the following installed:
+- Python 3.8 or higher
+- Node.js 14 or higher
+- npm (Node Package Manager)
+- pip (Python Package Manager)
 
 ## Backend Setup
 
-1. **Navigate to the backend directory:**
+1. Navigate to the backend directory:
+```bash
+cd backend
+```
 
-   ```bash
-   cd backend
-   ```
+2. Create a virtual environment:
+```bash
+python -m venv venv
+```
 
-2. **Create a `.env` file:**
-   This file will store your environment variables. Create a file named `.env` in the `backend` directory and add the following content, replacing placeholder values with your actual credentials where necessary:
+3. Activate the virtual environment:
+- On Windows:
+```bash
+.\venv\Scripts\activate
+```
+- On macOS/Linux:
+```bash
+source venv/bin/activate
+```
 
-   ```env
-   MONGO_URL="mongodb://localhost:27017"
-   DB_NAME="task_assistant"
-   TOGETHER_API_KEY="your_together_ai_api_key"
-   # OPENAI_API_KEY="your_openai_api_key" # Optional, if you switch LLM providers
-   ```
+4. Install required Python packages:
+```bash
+pip install -r requirements.txt
+```
 
-   * `MONGO_URL`: The connection string for your MongoDB instance.
-   * `DB_NAME`: The name of the database to be used (e.g., `task_assistant`).
-   * `TOGETHER_API_KEY`: Your API key from Together.ai for LLM access.
+5. Start the backend server:
+```bash
+uvicorn server:app --reload
+```
 
-3. **Install Python dependencies using Poetry:**
-   If you have an existing `poetry.lock` file, you can run:
-
-   ```bash
-   poetry install
-   ```
-
-   If you are setting up for the first time or need to resolve dependencies from `pyproject.toml`:
-
-   ```bash
-   poetry lock
-   poetry install
-   ```
-
-4. **Run the backend server:**
-
-   ```bash
-   poetry run uvicorn server:app --host 0.0.0.0 --port 8001 --reload
-   ```
-
-   The backend server will typically be available at `http://localhost:8001`. The `--reload` flag enables auto-reloading when code changes are detected.
+The backend server will start running at `http://localhost:8000`.
 
 ## Frontend Setup
 
-1. **Navigate to the frontend directory:**
+1. Open a new terminal and navigate to the frontend directory:
+```bash
+cd frontend
+```
 
-   ```bash
-   cd frontend
-   ```
+2. Install required npm packages:
+```bash
+npm install
+```
 
-2. **Create a `.env.local` file:**
-   This file will store your frontend environment variables. Create a file named `.env.local` in the `frontend` directory and add the following content:
+3. Start the frontend development server:
+```bash
+npm start
+```
 
-   ```env
-   REACT_APP_BACKEND_URL=http://localhost:8001
-   ```
+The frontend development server will start running at `http://localhost:3000`.
 
-   This tells the React application where the backend API is running.
+## Environment Variables
 
-3. **Install JavaScript dependencies using Yarn:**
+The application uses environment variables for configuration. Create a `.env` file in both the backend and frontend directories with the following variables:
 
-   ```bash
-   yarn install
-   ```
+### Backend (.env)
+```
+DATABASE_URL=sqlite:///./tasks.db
+```
 
-4. **Start the frontend development server:**
+### Frontend (.env)
+```
+REACT_APP_BACKEND_URL=http://localhost:8000
+```
 
-   ```bash
-   yarn start
-   ```
+## Accessing the Application
 
-   The frontend development server will typically open automatically in your browser at `http://localhost:3000`.
+Once both servers are running, you can access the GoodVibes application by navigating to `http://localhost:3000` in your web browser.
 
-## Running the Application
+## API Documentation
 
-1. **Ensure MongoDB is running.**
-2. **Start the backend server** (as described in Backend Setup step 4).
-3. **Start the frontend server** (as described in Frontend Setup step 4).
+The backend API documentation is available at:
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
 
-Once both servers are running, you can access the AI Task Assistant application by navigating to `http://localhost:3000` in your web browser.
+## Development Guidelines
 
-## Troubleshooting
+1. Follow the existing code style and conventions
+2. Write clear commit messages
+3. Add appropriate comments for complex logic
+4. Update documentation when making significant changes
 
-* **Port Conflicts**: If port `8001` or `3000` are in use, you can change them:
-  * For the backend, modify the `uvicorn` command: `poetry run uvicorn server:app --port <new_backend_port> --reload` and update `REACT_APP_BACKEND_URL` in `frontend/.env.local` accordingly.
-  * For the frontend, you might be prompted to use a different port if `3000` is busy, or you can configure it in `frontend/package.json` scripts if needed.
-* **MongoDB Connection Issues**: Verify that your MongoDB server is running and accessible at the `MONGO_URL` specified in `backend/.env`.
-* **API Key Issues**: Ensure your `TOGETHER_API_KEY` (or other LLM provider keys) in `backend/.env` is correct and has the necessary permissions.
+## Testing
+
+### Backend Tests
+```bash
+cd backend
+pytest
+```
+
+### Frontend Tests
+```bash
+cd frontend
+npm test
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
