@@ -732,6 +732,7 @@ const CalendarView = ({ userId }) => {
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState('month'); // 'month', 'week', or 'day'
+  const [showMode, setShowMode] = useState('tasks'); // 'tasks' or 'subtasks'
   
   // Helper to get days in month
   const getDaysInMonth = (year, month) => {
@@ -788,18 +789,31 @@ const CalendarView = ({ userId }) => {
     setCurrentDate(new Date());
   };
   
-  // Group tasks by date
-  const tasksByDate = {};
-  tasks.forEach(task => {
-    if (task.deadline) {
-      const taskDate = new Date(task.deadline);
-      const taskDateStr = taskDate.toDateString();
-      if (!tasksByDate[taskDateStr]) {
-        tasksByDate[taskDateStr] = [];
+  // Group items by date
+  const itemsByDate = {};
+  if (showMode === 'tasks') {
+    tasks.forEach(task => {
+      if (task.deadline) {
+        const taskDate = new Date(task.deadline);
+        const taskDateStr = taskDate.toDateString();
+        if (!itemsByDate[taskDateStr]) itemsByDate[taskDateStr] = [];
+        itemsByDate[taskDateStr].push({ ...task, _type: 'task' });
       }
-      tasksByDate[taskDateStr].push(task);
-    }
-  });
+    });
+  } else {
+    tasks.forEach(task => {
+      if (task.subtasks && Array.isArray(task.subtasks)) {
+        task.subtasks.forEach(subtask => {
+          if (subtask.deadline) {
+            const subtaskDate = new Date(subtask.deadline);
+            const subtaskDateStr = subtaskDate.toDateString();
+            if (!itemsByDate[subtaskDateStr]) itemsByDate[subtaskDateStr] = [];
+            itemsByDate[subtaskDateStr].push({ ...subtask, parentTask: task.title, _type: 'subtask' });
+          }
+        });
+      }
+    });
+  }
 
   // Get week dates
   const getWeekDates = (date) => {
@@ -863,7 +877,7 @@ const CalendarView = ({ userId }) => {
             const date = new Date(year, month, day);
             const isToday = date.toDateString() === new Date().toDateString();
             const dateStr = date.toDateString();
-            const dayTasks = tasksByDate[dateStr] || [];
+            const dayItems = itemsByDate[dateStr] || [];
             
             return (
               <div 
@@ -876,15 +890,15 @@ const CalendarView = ({ userId }) => {
                   {day}
                 </div>
                 <div className="mt-1 overflow-y-auto max-h-16">
-                  {dayTasks.map(task => (
+                  {dayItems.map(item => (
                     <div 
-                      key={task.id}
+                      key={item.id}
                       className={`text-xs p-1 mb-1 truncate rounded ${
-                        task.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800'
+                        item._type === 'task' ? (item.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800') : (item.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800')
                       }`}
-                      title={task.title}
+                      title={item._type === 'subtask' ? (item.title || item.description) : item.title}
                     >
-                      {task.title}
+                      {item._type === 'subtask' ? (item.title || item.description) : item.title}
                     </div>
                   ))}
                 </div>
@@ -905,7 +919,7 @@ const CalendarView = ({ userId }) => {
           {weekDates.map((date, index) => {
             const isToday = date.toDateString() === new Date().toDateString();
             const dateStr = date.toDateString();
-            const dayTasks = tasksByDate[dateStr] || [];
+            const dayItems = itemsByDate[dateStr] || [];
             
             return (
               <div 
@@ -921,18 +935,16 @@ const CalendarView = ({ userId }) => {
                   <div className="text-lg">{date.getDate()}</div>
                 </div>
                 <div className="space-y-2">
-                  {dayTasks.map(task => (
+                  {dayItems.map(item => (
                     <div
-                      key={task.id}
+                      key={item.id}
                       className={`p-2 rounded-md text-sm ${
-                        task.completed 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-indigo-100 text-indigo-800'
+                        item._type === 'task' ? (item.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800') : (item.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800')
                       }`}
                     >
-                      <div className="font-medium truncate">{task.title}</div>
+                      <div className="font-medium truncate">{item._type === 'subtask' ? item.description : item.title}</div>
                       <div className="text-xs mt-1">
-                        {formatDate(task.deadline)}
+                        {formatDate(item.deadline)}
                       </div>
                     </div>
                   ))}
@@ -948,7 +960,7 @@ const CalendarView = ({ userId }) => {
   const renderDayView = () => {
     const hours = getHourSlots();
     const dateStr = currentDate.toDateString();
-    const dayTasks = tasksByDate[dateStr] || [];
+    const dayItems = itemsByDate[dateStr] || [];
     
     return (
       <div className="bg-white rounded-lg shadow">
@@ -967,8 +979,8 @@ const CalendarView = ({ userId }) => {
         </div>
         <div className="divide-y">
           {hours.map(hour => {
-            const hourTasks = dayTasks.filter(task => {
-              const taskHour = new Date(task.deadline).getHours();
+            const hourItems = dayItems.filter(item => {
+              const taskHour = new Date(item.deadline).getHours();
               return taskHour === hour;
             });
             
@@ -978,18 +990,16 @@ const CalendarView = ({ userId }) => {
                   {formatTime(hour)}
                 </div>
                 <div className="flex-1 py-2 px-4 border-l">
-                  {hourTasks.map(task => (
+                  {hourItems.map(item => (
                     <div
-                      key={task.id}
+                      key={item.id}
                       className={`p-2 rounded-md text-sm mb-2 ${
-                        task.completed 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-indigo-100 text-indigo-800'
+                        item._type === 'task' ? (item.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800') : (item.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800')
                       }`}
                     >
-                      <div className="font-medium">{task.title}</div>
+                      <div className="font-medium">{item._type === 'subtask' ? item.description : item.title}</div>
                       <div className="text-xs mt-1">
-                        {formatDate(task.deadline)}
+                        {formatDate(item.deadline)}
                       </div>
                     </div>
                   ))}
@@ -1033,6 +1043,25 @@ const CalendarView = ({ userId }) => {
               }`}
             >
               Day
+            </button>
+          </div>
+          {/* Toggle for Tasks/Subtasks */}
+          <div className="ml-4 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setShowMode('tasks')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors duration-200 ${
+                showMode === 'tasks' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Tasks
+            </button>
+            <button
+              onClick={() => setShowMode('subtasks')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors duration-200 ${
+                showMode === 'subtasks' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Subtasks
             </button>
           </div>
         </div>
@@ -1194,7 +1223,7 @@ const TimelineView = ({ userId }) => {
                       <div className="flex justify-between items-start">
                         <div>
                           <h4 className={`font-medium ${task.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
-                            {task.title}
+                            {task._type === 'subtask' ? task.description : task.title}
                           </h4>
                           <p className="text-sm text-gray-600 mt-1">
                             Due: {formatDate(task.deadline)}

@@ -50,6 +50,7 @@ class User(BaseModel):
 class Subtask(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str
+    title: str
     description: str
     completed: bool = False
     deadline: Optional[datetime] = None
@@ -87,12 +88,14 @@ class TaskUpdate(BaseModel):
 
 
 class SubtaskCreate(BaseModel):
+    title: str
     description: str
     deadline: Optional[datetime] = None
     order: int = 0
 
 
 class SubtaskUpdate(BaseModel):
+    title: Optional[str] = None
     description: Optional[str] = None
     completed: Optional[bool] = None
     deadline: Optional[datetime] = None
@@ -150,6 +153,7 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     Please analyze this task and provide:
     1. A clear task title
     2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
+       - Each subtask MUST include a 'title', a 'description', and a 'deadline' field
     3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DD format)
     4. A priority level (low, medium, high)
     5. A brief encouraging message to help the user stay motivated
@@ -164,17 +168,17 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     - If no deadline is mentioned, set deadline to null
     
     Format your response as a JSON object with these keys: 
-    "title", "subtasks" (array of objects with "description" and "deadline"), "deadline", "priority", "emotional_support"
+    "title", "subtasks" (array of objects with "title", "description", and "deadline"), "deadline", "priority", "emotional_support"
     
     Example format:
     {{
         "title": "Write quarterly report",
         "subtasks": [
-            {{ "description": "Gather sales data", "deadline": "2025-04-01" }},
-            {{ "description": "Analyze market trends", "deadline": "2025-04-05" }},
-            {{ "description": "Create charts and graphs", "deadline": "2025-04-10" }},
-            {{ "description": "Write executive summary", "deadline": "2025-04-12" }},
-            {{ "description": "Proofread and finalize", "deadline": "2025-04-14" }}
+            {{ "title": "Collect sales data", "description": "Gather all sales data from Q1", "deadline": "2025-04-01" }},
+            {{ "title": "Analyze market trends", "description": "Review competitor performance", "deadline": "2025-04-05" }},
+            {{ "title": "Create charts and graphs", "description": "Visualize key metrics", "deadline": "2025-04-10" }},
+            {{ "title": "Write executive summary", "description": "Summarize findings", "deadline": "2025-04-12" }},
+            {{ "title": "Proofread and finalize", "description": "Check for errors and finalize report", "deadline": "2025-04-14" }}
         ],
         "deadline": "2025-04-15",
         "priority": "high",
@@ -414,6 +418,7 @@ async def create_subtask(task_id: str, subtask_create: SubtaskCreate):
     # Create subtask
     subtask = Subtask(
         task_id=task_id,
+        title=subtask_create.title,
         description=subtask_create.description,
         deadline=subtask_create.deadline,
         order=subtask_create.order or len(task.get("subtasks", [])),
@@ -559,8 +564,10 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
             subtask_desc = str(subtask_item)
             subtask_deadline = None
             
+        subtask_title = subtask_item.get('title') or subtask_desc
         subtask = Subtask(
             task_id=task.id,
+            title=subtask_title,
             description=subtask_desc,
             deadline=subtask_deadline,
             order=i
