@@ -269,49 +269,67 @@ const Statistics = ({ userId }) => {
   return (
     <div className="p-6">
       {/* AI Feedback Section */}
-      <div className="mb-12">
-        <h2 className="text-2xl font-bold mb-6">AI Analysis</h2>
-        {aiFeedbackLoading ? (
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center justify-center space-x-2">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-              <span className="text-gray-600">Generating AI feedback...</span>
-            </div>
-          </div>
-        ) : aiFeedback && !aiFeedbackError ? (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-sm">
-            <div className="p-6">
-              <div className="flex items-start space-x-4">
+      {aiFeedback && !aiFeedbackError && (
+        <div className="mb-8 overflow-hidden">
+          <div className="bg-gradient-to-br from-blue-50/80 via-purple-50/80 to-pink-50/80 rounded-2xl shadow-sm border border-blue-100/30">
+            <div className="p-8">
+              <div className="flex items-start space-x-6">
                 <div className="flex-shrink-0">
-                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-purple-100 rounded-2xl flex items-center justify-center transform rotate-2">
+                    <svg className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                     </svg>
                   </div>
                 </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{aiFeedback.summary}</h3>
+                
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+                    Your Productivity Journey
+                  </h2>
+                  <p className="text-lg text-gray-700 mb-6 leading-relaxed">
+                    {aiFeedback.summary}
+                  </p>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Key Insights</h4>
-                      <ul className="space-y-2">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Key Insights */}
+                    <div className="bg-white/60 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+                      <h3 className="flex items-center text-lg font-medium text-gray-800 mb-4">
+                        <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
+                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                        </span>
+                        Key Insights
+                      </h3>
+                      <ul className="space-y-3">
                         {aiFeedback.insights.map((insight, index) => (
-                          <li key={index} className="flex items-start">
-                            <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-blue-500 rounded-full"></span>
-                            <span className="ml-2 text-sm text-gray-600">{insight}</span>
+                          <li key={index} className="flex items-start group">
+                            <span className="flex-shrink-0 w-6 h-6 bg-blue-50 rounded-full flex items-center justify-center mr-3 group-hover:bg-blue-100 transition-colors">
+                              <span className="text-blue-600 text-sm font-medium">{index + 1}</span>
+                            </span>
+                            <p className="text-gray-600 leading-relaxed">{insight}</p>
                           </li>
                         ))}
                       </ul>
                     </div>
-                    
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Suggestions</h4>
-                      <ul className="space-y-2">
+
+                    {/* Suggestions for Growth */}
+                    <div className="bg-white/60 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+                      <h3 className="flex items-center text-lg font-medium text-gray-800 mb-4">
+                        <span className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
+                          <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                        </span>
+                        Growth Opportunities
+                      </h3>
+                      <ul className="space-y-3">
                         {aiFeedback.suggestions.map((suggestion, index) => (
-                          <li key={index} className="flex items-start">
-                            <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-green-500 rounded-full"></span>
-                            <span className="ml-2 text-sm text-gray-600">{suggestion}</span>
+                          <li key={index} className="flex items-start group">
+                            <span className="flex-shrink-0 w-6 h-6 bg-purple-50 rounded-full flex items-center justify-center mr-3 group-hover:bg-purple-100 transition-colors">
+                              <span className="text-purple-600 text-sm font-medium">{index + 1}</span>
+                            </span>
+                            <p className="text-gray-600 leading-relaxed">{suggestion}</p>
                           </li>
                         ))}
                       </ul>
@@ -321,43 +339,52 @@ const Statistics = ({ userId }) => {
               </div>
             </div>
           </div>
-        ) : aiFeedbackError ? (
-          <div className="bg-yellow-50 rounded-lg shadow-sm">
-            <div className="p-4">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm text-yellow-700">{aiFeedbackError}</p>
-                  <button
-                    onClick={fetchAIFeedback}
-                    className="mt-2 text-sm text-yellow-700 hover:text-yellow-800 underline"
-                  >
-                    Try Again
-                  </button>
-                </div>
+        </div>
+      )}
+
+      {aiFeedbackError && (
+        <div className="mb-8 bg-yellow-50 rounded-lg shadow-sm">
+          <div className="p-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-yellow-700">{aiFeedbackError}</p>
+                <button
+                  onClick={fetchAIFeedback}
+                  className="mt-2 text-sm text-yellow-700 hover:text-yellow-800 underline"
+                >
+                  Try Again
+                </button>
               </div>
             </div>
           </div>
-        ) : null}
-      </div>
+        </div>
+      )}
 
       {/* Overall Completion Trends Section */}
       <div className="mb-12">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold">Completion Trends</h2>
+          <h2 className="text-2xl font-semibold text-gray-800 flex items-center">
+            <span className="w-10 h-10 bg-gradient-to-br from-blue-100 to-purple-100 rounded-xl flex items-center justify-center mr-3 transform rotate-2">
+              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+              </svg>
+            </span>
+            Your Progress Timeline
+          </h2>
           <div className="flex space-x-2">
             {['day', 'week', 'month', 'year'].map((range) => (
               <button
                 key={range}
                 onClick={() => setTimeRange(range)}
-                className={`px-3 py-1 rounded ${
+                className={`px-4 py-2 rounded-lg transition-all duration-200 ${
                   timeRange === range
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md'
+                    : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
                 }`}
               >
                 {range.charAt(0).toUpperCase() + range.slice(1)}
@@ -366,7 +393,7 @@ const Statistics = ({ userId }) => {
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-lg shadow">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100/80 p-6">
           <div className="h-96">
             {chartData && tasksWithSubtasks.length > 0 && (
               <Line
@@ -378,16 +405,48 @@ const Statistics = ({ userId }) => {
                   scales: {
                     y: {
                       beginAtZero: true,
+                      grid: {
+                        color: 'rgba(226, 232, 240, 0.5)',
+                      },
+                      ticks: {
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                        },
+                        color: '#64748b',
+                      },
                       title: {
                         display: true,
-                        text: 'Number of Completions'
+                        text: 'Completed Tasks',
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                          size: 14,
+                          weight: '500',
+                        },
+                        color: '#475569',
+                      }
+                    },
+                    x: {
+                      grid: {
+                        color: 'rgba(226, 232, 240, 0.5)',
+                      },
+                      ticks: {
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                        },
+                        color: '#64748b',
                       }
                     }
                   },
                   plugins: {
-                    title: {
-                      display: true,
-                      text: 'Task and Subtask Completion Trends'
+                    legend: {
+                      labels: {
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                          size: 13,
+                        },
+                        usePointStyle: true,
+                        padding: 20,
+                      }
                     }
                   }
                 }}
@@ -399,8 +458,15 @@ const Statistics = ({ userId }) => {
 
       {/* Task Tracking Section */}
       <div>
-        <h2 className="text-2xl font-bold mb-6">Task Tracking</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+          <span className="w-10 h-10 bg-gradient-to-br from-purple-100 to-pink-100 rounded-xl flex items-center justify-center mr-3 transform -rotate-2">
+            <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+          </span>
+          Task Progress Details
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {tasksWithSubtasks.map(task => {
             const basicStats = calculateBasicTaskStats(task);
             const isExpanded = expandedTaskId === task.id;
@@ -409,66 +475,78 @@ const Statistics = ({ userId }) => {
             return (
               <div 
                 key={task.id}
-                className="bg-white rounded-lg shadow cursor-pointer transition-all duration-200 hover:shadow-lg"
+                className="bg-white rounded-xl shadow-sm border border-gray-100/80 transition-all duration-200 hover:shadow-md cursor-pointer overflow-hidden"
                 onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
               >
-                {/* Basic Info (Always Visible) */}
-                <div className="p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="text-lg font-semibold text-gray-800">{task.title}</h3>
-                    <span className={`px-2 py-1 rounded text-sm ${
-                      task.priority === 'high' ? 'bg-red-100 text-red-800' :
-                      task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-green-100 text-green-800'
+                {/* Basic Info */}
+                <div className="p-5">
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className="text-lg font-medium text-gray-800">{task.title}</h3>
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      task.priority === 'high' ? 'bg-red-100 text-red-700' :
+                      task.priority === 'medium' ? 'bg-amber-100 text-amber-700' :
+                      'bg-emerald-100 text-emerald-700'
                     }`}>
                       {task.priority}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center text-sm text-gray-600">
-                    <span>{basicStats.completedSubtasks}/{basicStats.totalSubtasks} subtasks</span>
-                    <span className="font-medium text-blue-600">{basicStats.completionRate.toFixed(1)}%</span>
+                  <div className="flex items-center">
+                    <div className="flex-1">
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-300"
+                          style={{ width: `${basicStats.completionRate}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span className="ml-3 text-sm font-medium text-gray-600">
+                      {basicStats.completedSubtasks}/{basicStats.totalSubtasks}
+                    </span>
                   </div>
                 </div>
 
                 {/* Expanded Content */}
                 {isExpanded && subtaskStats && (
-                  <div className="border-t border-gray-100 p-4">
-                    <div className="space-y-4">
+                  <div className="border-t border-gray-100">
+                    <div className="p-5 space-y-4">
                       {/* Progress Stats */}
-                      <div className="bg-gray-50 p-3 rounded">
-                        <h4 className="text-sm font-medium text-gray-600 mb-2">Progress Details</h4>
-                        <div className="space-y-1">
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Total Subtasks:</span>
-                            <span className="font-medium">{subtaskStats.totalSubtasks}</span>
+                      <div className="bg-gradient-to-br from-gray-50 to-gray-50/50 rounded-xl p-4">
+                        <h4 className="text-sm font-medium text-gray-700 mb-3">Progress Overview</h4>
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Total Subtasks</span>
+                            <span className="font-medium text-gray-800">{subtaskStats.totalSubtasks}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Completed:</span>
-                            <span className="font-medium text-green-600">{subtaskStats.completedSubtasks}</span>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Completed</span>
+                            <span className="font-medium text-emerald-600">{subtaskStats.completedSubtasks}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Completion Rate:</span>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Completion Rate</span>
                             <span className="font-medium text-blue-600">{subtaskStats.completionRate.toFixed(1)}%</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Completion Timeline */}
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-600 mb-2">Recent Completions</h4>
-                        <div className="space-y-2">
-                          {subtaskStats.completionTimeline.slice(0, 3).map((completion, index) => (
-                            <div key={index} className="flex items-center space-x-4 p-2 bg-gray-50 rounded">
-                              <div className="w-24 text-sm text-gray-500">
-                                {completion.date.toLocaleDateString()}
+                      {/* Recent Completions */}
+                      {subtaskStats.completionTimeline.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700 mb-3">Recent Progress</h4>
+                          <div className="space-y-2">
+                            {subtaskStats.completionTimeline.slice(0, 3).map((completion, index) => (
+                              <div key={index} className="flex items-center space-x-3 p-2 bg-gray-50/50 rounded-lg">
+                                <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-sm text-gray-600 truncate">{completion.description}</div>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {completion.date.toLocaleDateString()}
+                                </div>
                               </div>
-                              <div className="flex-1">
-                                <div className="text-gray-700">{completion.description}</div>
-                              </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )}
