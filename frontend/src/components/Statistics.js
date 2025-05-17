@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
   Chart as ChartJS,
@@ -9,8 +9,10 @@ import {
   LinearScale,
   BarElement,
   Title,
+  PointElement,
+  LineElement,
 } from 'chart.js';
-import { Pie, Bar } from 'react-chartjs-2';
+import { Pie, Bar, Line } from 'react-chartjs-2';
 
 // Register ChartJS components
 ChartJS.register(
@@ -20,7 +22,9 @@ ChartJS.register(
   CategoryScale,
   LinearScale,
   BarElement,
-  Title
+  Title,
+  PointElement,
+  LineElement
 );
 
 const Statistics = ({ userId }) => {
@@ -28,6 +32,9 @@ const Statistics = ({ userId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [tasksWithSubtasks, setTasksWithSubtasks] = useState([]);
+  const [expandedTaskId, setExpandedTaskId] = useState(null);
+  const [timeRange, setTimeRange] = useState('week'); // 'day', 'week', 'month', 'year'
+  const chartRef = useRef(null);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -47,280 +54,275 @@ const Statistics = ({ userId }) => {
     };
 
     fetchStats();
+
+    // Cleanup function
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy();
+      }
+    };
   }, [userId]);
 
-  if (loading) return <div className="p-4">Loading statistics...</div>;
-  if (error) return <div className="p-4 text-red-500">{error}</div>;
-  if (!stats) return <div className="p-4">No statistics available</div>;
+  // Function to prepare completion trend data
+  const prepareCompletionTrendData = () => {
+    const now = new Date();
+    let startDate;
+    let labels;
+    
+    switch (timeRange) {
+      case 'day':
+        startDate = new Date(now.setHours(0, 0, 0, 0));
+        labels = Array.from({length: 24}, (_, i) => `${i}:00`);
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        break;
+      case 'month':
+        startDate = new Date(now.setMonth(now.getMonth() - 1));
+        labels = Array.from({length: 30}, (_, i) => `Day ${i + 1}`);
+        break;
+      case 'year':
+        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+        labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        break;
+      default:
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    }
 
-  // Prepare data for priority distribution chart
-  const priorityData = {
-    labels: ['High', 'Medium', 'Low'],
-    datasets: [
-      {
-        data: [
-          stats.tasks_by_priority.high,
-          stats.tasks_by_priority.medium,
-          stats.tasks_by_priority.low,
-        ],
-        backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
-      },
-    ],
+    // Initialize data arrays with zeros
+    const taskData = new Array(labels.length).fill(0);
+    const subtaskData = new Array(labels.length).fill(0);
+
+    // Filter and count completions
+    tasksWithSubtasks.forEach(task => {
+      if (task.completed && new Date(task.updated_at) >= startDate) {
+        const index = getIndexForDate(new Date(task.updated_at), timeRange);
+        if (index >= 0 && index < labels.length) {
+          taskData[index]++;
+        }
+      }
+
+      task.subtasks?.forEach(subtask => {
+        if (subtask.completed && new Date(subtask.updated_at) >= startDate) {
+          const index = getIndexForDate(new Date(subtask.updated_at), timeRange);
+          if (index >= 0 && index < labels.length) {
+            subtaskData[index]++;
+          }
+        }
+      });
+    });
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Tasks Completed',
+          data: taskData,
+          borderColor: '#3b82f6',
+          backgroundColor: '#3b82f6',
+          tension: 0.4,
+        },
+        {
+          label: 'Subtasks Completed',
+          data: subtaskData,
+          borderColor: '#10b981',
+          backgroundColor: '#10b981',
+          tension: 0.4,
+        },
+      ],
+    };
   };
 
-  // Prepare data for completion status chart
-  const statusData = {
-    labels: ['Completed', 'In Progress'],
-    datasets: [
-      {
-        data: [stats.tasks_by_status.completed, stats.tasks_by_status.in_progress],
-        backgroundColor: ['#10b981', '#3b82f6'],
-      },
-    ],
+  // Helper function to get index for a date based on time range
+  const getIndexForDate = (date, range) => {
+    switch (range) {
+      case 'day':
+        return date.getHours();
+      case 'week':
+        return date.getDay();
+      case 'month':
+        return date.getDate() - 1;
+      case 'year':
+        return date.getMonth();
+      default:
+        return date.getDay();
+    }
   };
 
-  // Prepare data for weekly completion chart
-  const weeklyData = {
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    datasets: [
-      {
-        label: 'Completed Tasks',
-        data: [0, 0, 0, 0, 0, 0, 0], // This would need to be calculated from recent_completions
-        backgroundColor: '#3b82f6',
-      },
-    ],
-  };
-
-  // Prepare data for subtask priority distribution chart
-  const subtaskPriorityData = {
-    labels: ['High', 'Medium', 'Low'],
-    datasets: [
-      {
-        data: [
-          stats.subtasks_by_priority.high,
-          stats.subtasks_by_priority.medium,
-          stats.subtasks_by_priority.low,
-        ],
-        backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
-      },
-    ],
-  };
-
-  // Prepare data for subtask completion status chart
-  const subtaskStatusData = {
-    labels: ['Completed', 'In Progress'],
-    datasets: [
-      {
-        data: [stats.subtasks_by_status.completed, stats.subtasks_by_status.in_progress],
-        backgroundColor: ['#10b981', '#3b82f6'],
-      },
-    ],
-  };
-
-  // Function to calculate subtask statistics for a task
+  // Function to calculate subtask statistics for a specific task
   const calculateSubtaskStats = (task) => {
     const subtasks = task.subtasks || [];
     const totalSubtasks = subtasks.length;
     const completedSubtasks = subtasks.filter(st => st.completed).length;
     const completionRate = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
     
-    // Calculate average completion time for subtasks
-    const completionTimes = subtasks
+    // Calculate completion timeline
+    const completionTimeline = subtasks
       .filter(st => st.completed && st.created_at && st.updated_at)
-      .map(st => {
-        const created = new Date(st.created_at);
-        const updated = new Date(st.updated_at);
-        return (updated - created) / (1000 * 60 * 60); // Convert to hours
-      });
-    
-    const avgCompletionTime = completionTimes.length > 0
-      ? completionTimes.reduce((a, b) => a + b, 0) / completionTimes.length
-      : null;
-
-    // Count subtasks by deadline status
-    const now = new Date();
-    const upcomingDeadlines = subtasks.filter(st => 
-      st.deadline && !st.completed && new Date(st.deadline) > now
-    ).length;
-    const overdueDeadlines = subtasks.filter(st => 
-      st.deadline && !st.completed && new Date(st.deadline) <= now
-    ).length;
+      .map(st => ({
+        date: new Date(st.updated_at),
+        description: st.description
+      }))
+      .sort((a, b) => a.date - b.date);
 
     return {
       totalSubtasks,
       completedSubtasks,
       completionRate,
-      avgCompletionTime,
-      upcomingDeadlines,
-      overdueDeadlines
+      completionTimeline
     };
   };
 
+  // Function to calculate basic task stats
+  const calculateBasicTaskStats = (task) => {
+    const subtasks = task.subtasks || [];
+    const totalSubtasks = subtasks.length;
+    const completedSubtasks = subtasks.filter(st => st.completed).length;
+    const completionRate = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
+    
+    return {
+      totalSubtasks,
+      completedSubtasks,
+      completionRate
+    };
+  };
+
+  if (loading) return <div className="p-4">Loading statistics...</div>;
+  if (error) return <div className="p-4 text-red-500">{error}</div>;
+  if (!stats) return <div className="p-4">No statistics available</div>;
+
   return (
     <div className="p-6">
-      <h2 className="text-2xl font-bold mb-6">Task Statistics</h2>
-      
-      {/* Task Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Total Tasks</h3>
-          <p className="text-3xl font-bold text-indigo-600">{stats.total_tasks}</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Completion Rate</h3>
-          <p className="text-3xl font-bold text-green-600">{stats.completion_rate.toFixed(1)}%</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Avg. Completion Time</h3>
-          <p className="text-3xl font-bold text-blue-600">
-            {stats.average_completion_time ? `${stats.average_completion_time.toFixed(1)}h` : 'N/A'}
-          </p>
-        </div>
-      </div>
-
-      {/* Task Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Tasks by Priority</h3>
-          <div className="h-64">
-            <Pie data={priorityData} options={{ maintainAspectRatio: false }} />
+      {/* Overall Completion Trends Section */}
+      <div className="mb-12">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold">Completion Trends</h2>
+          <div className="flex space-x-2">
+            {['day', 'week', 'month', 'year'].map((range) => (
+              <button
+                key={range}
+                onClick={() => setTimeRange(range)}
+                className={`px-3 py-1 rounded ${
+                  timeRange === range
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {range.charAt(0).toUpperCase() + range.slice(1)}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Tasks by Status</h3>
-          <div className="h-64">
-            <Pie data={statusData} options={{ maintainAspectRatio: false }} />
-          </div>
-        </div>
-      </div>
 
-      {/* Subtask Statistics Section */}
-      <h2 className="text-2xl font-bold mb-6 mt-12">Subtask Statistics</h2>
-      
-      {/* Subtask Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Total Subtasks</h3>
-          <p className="text-3xl font-bold text-indigo-600">{stats.total_subtasks}</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Subtask Completion Rate</h3>
-          <p className="text-3xl font-bold text-green-600">{stats.subtask_completion_rate.toFixed(1)}%</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Avg. Subtasks per Task</h3>
-          <p className="text-3xl font-bold text-blue-600">
-            {stats.average_subtasks_per_task.toFixed(1)}
-          </p>
-        </div>
-      </div>
-
-      {/* Subtask Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Subtasks by Priority</h3>
-          <div className="h-64">
-            <Pie data={subtaskPriorityData} options={{ maintainAspectRatio: false }} />
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Subtasks by Status</h3>
-          <div className="h-64">
-            <Pie data={subtaskStatusData} options={{ maintainAspectRatio: false }} />
+          <div className="h-96">
+            <Line
+              ref={chartRef}
+              data={prepareCompletionTrendData()}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    title: {
+                      display: true,
+                      text: 'Number of Completions'
+                    }
+                  }
+                },
+                plugins: {
+                  title: {
+                    display: true,
+                    text: 'Task and Subtask Completion Trends'
+                  }
+                }
+              }}
+            />
           </div>
         </div>
       </div>
 
-      {/* Subtasks by Task Section */}
-      <div className="mt-12">
-        <h2 className="text-2xl font-bold mb-6">Subtasks by Task</h2>
-        <div className="space-y-6">
-          {tasksWithSubtasks.map((task) => {
-            const subtaskStats = calculateSubtaskStats(task);
-            
+      {/* Task Tracking Section */}
+      <div>
+        <h2 className="text-2xl font-bold mb-6">Task Tracking</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {tasksWithSubtasks.map(task => {
+            const basicStats = calculateBasicTaskStats(task);
+            const isExpanded = expandedTaskId === task.id;
+            const subtaskStats = isExpanded ? calculateSubtaskStats(task) : null;
+
             return (
-              <div key={task.id} className="bg-white p-4 rounded-lg shadow">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-800">{task.title}</h3>
-                  <span className={`px-3 py-1 rounded-full text-sm ${
-                    task.completed ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {task.completed ? 'Completed' : 'In Progress'}
-                  </span>
+              <div 
+                key={task.id}
+                className="bg-white rounded-lg shadow cursor-pointer transition-all duration-200 hover:shadow-lg"
+                onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
+              >
+                {/* Basic Info (Always Visible) */}
+                <div className="p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="text-lg font-semibold text-gray-800">{task.title}</h3>
+                    <span className={`px-2 py-1 rounded text-sm ${
+                      task.priority === 'high' ? 'bg-red-100 text-red-800' :
+                      task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-green-100 text-green-800'
+                    }`}>
+                      {task.priority}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm text-gray-600">
+                    <span>{basicStats.completedSubtasks}/{basicStats.totalSubtasks} subtasks</span>
+                    <span className="font-medium text-blue-600">{basicStats.completionRate.toFixed(1)}%</span>
+                  </div>
                 </div>
-                
-                {subtaskStats.totalSubtasks > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Completion Stats */}
-                    <div className="bg-gray-50 p-3 rounded">
-                      <h4 className="text-sm font-medium text-gray-600 mb-2">Completion</h4>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Total Subtasks:</span>
-                          <span className="font-medium">{subtaskStats.totalSubtasks}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Completed:</span>
-                          <span className="font-medium text-green-600">{subtaskStats.completedSubtasks}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Completion Rate:</span>
-                          <span className="font-medium text-blue-600">{subtaskStats.completionRate.toFixed(1)}%</span>
+
+                {/* Expanded Content */}
+                {isExpanded && subtaskStats && (
+                  <div className="border-t border-gray-100 p-4">
+                    <div className="space-y-4">
+                      {/* Progress Stats */}
+                      <div className="bg-gray-50 p-3 rounded">
+                        <h4 className="text-sm font-medium text-gray-600 mb-2">Progress Details</h4>
+                        <div className="space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Total Subtasks:</span>
+                            <span className="font-medium">{subtaskStats.totalSubtasks}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Completed:</span>
+                            <span className="font-medium text-green-600">{subtaskStats.completedSubtasks}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Completion Rate:</span>
+                            <span className="font-medium text-blue-600">{subtaskStats.completionRate.toFixed(1)}%</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Time Stats */}
-                    <div className="bg-gray-50 p-3 rounded">
-                      <h4 className="text-sm font-medium text-gray-600 mb-2">Time Metrics</h4>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Avg. Completion Time:</span>
-                          <span className="font-medium">
-                            {subtaskStats.avgCompletionTime 
-                              ? `${subtaskStats.avgCompletionTime.toFixed(1)}h`
-                              : 'N/A'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Deadline Stats */}
-                    <div className="bg-gray-50 p-3 rounded">
-                      <h4 className="text-sm font-medium text-gray-600 mb-2">Deadlines</h4>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Upcoming:</span>
-                          <span className="font-medium text-blue-600">{subtaskStats.upcomingDeadlines}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Overdue:</span>
-                          <span className="font-medium text-red-600">{subtaskStats.overdueDeadlines}</span>
+                      {/* Completion Timeline */}
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-600 mb-2">Recent Completions</h4>
+                        <div className="space-y-2">
+                          {subtaskStats.completionTimeline.slice(0, 3).map((completion, index) => (
+                            <div key={index} className="flex items-center space-x-4 p-2 bg-gray-50 rounded">
+                              <div className="w-24 text-sm text-gray-500">
+                                {completion.date.toLocaleDateString()}
+                              </div>
+                              <div className="flex-1">
+                                <div className="text-gray-700">{completion.description}</div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <p className="text-gray-500 italic">No subtasks for this task</p>
                 )}
               </div>
             );
           })}
-        </div>
-      </div>
-
-      {/* Recent Completions */}
-      <div className="mt-8 bg-white p-4 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Recent Completions</h3>
-        <div className="space-y-2">
-          {stats.recent_completions.map((task) => (
-            <div key={task.id} className="flex justify-between items-center p-2 hover:bg-gray-50">
-              <span className="font-medium">{task.title}</span>
-              <span className="text-sm text-gray-500">
-                Completed {new Date(task.updated_at).toLocaleDateString()}
-              </span>
-            </div>
-          ))}
         </div>
       </div>
     </div>
