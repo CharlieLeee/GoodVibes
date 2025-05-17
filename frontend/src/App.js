@@ -457,11 +457,10 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
               
               {/* Priority and Due Date Display */}
               <div className="flex items-center space-x-3 mt-1 mb-2">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                  ${task.priority === 'high' ? 'bg-red-100 text-red-800' : 
-                    task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
-                    'bg-green-100 text-green-800'}`}>
-                  {task.priority ? task.priority.charAt(0).toUpperCase() + task.priority.slice(1) : 'No'} Priority
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-white/40 text-gray-800 border border-gray-200" style={{backdropFilter: 'blur(2px)'}}>
+                  {task.priority === 'high' && <span>⚡⚡</span>}
+                  {task.priority === 'medium' && <span>⚡</span>}
+                  {task.priority === 'low' && <span> 🌱 </span>}
                 </span>
                 {editingDate ? (
                   <div className="flex items-center space-x-2">
@@ -560,14 +559,9 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
                       
                       {/* Subtask Priority and Due Date Display */}
                       <div className="flex items-center space-x-2 mt-1">
-                        {subtask.priority && (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                            ${subtask.priority === 'high' ? 'bg-red-50 text-red-700' : 
-                              subtask.priority === 'medium' ? 'bg-yellow-50 text-yellow-700' : 
-                              'bg-green-50 text-green-700'}`}>
-                            {subtask.priority.charAt(0).toUpperCase() + subtask.priority.slice(1)}
-                          </span>
-                        )}
+                        {subtask.priority === 'high' && <span>⚡⚡</span>}
+                        {subtask.priority === 'medium' && <span>⚡</span>}
+                        {subtask.priority === 'low' && <span> 🌱 </span>}
                         {subtask.deadline && (
                           <span className={`text-xs ${new Date(subtask.deadline) < new Date() && !subtask.completed ? 'text-red-600' : 'text-gray-500'}`}>
                             Due: {formatDate(subtask.deadline)}
