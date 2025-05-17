@@ -654,12 +654,9 @@ const TasksList = ({ userId }) => {
 
   const updateTask = async (taskId, updateData) => {
     try {
-      // If updateData has an 'id' property, it's a complete task object from a subtask update
       if (updateData.id) {
-        // Just update the tasks array with the full object
         setTasks(tasks.map(task => task.id === taskId ? updateData : task));
       } else {
-        // It's a partial update, so make the API call
         const response = await axios.put(`${API}/tasks/${taskId}`, updateData);
         setTasks(tasks.map(task => task.id === taskId ? response.data : task));
       }
@@ -687,9 +684,7 @@ const TasksList = ({ userId }) => {
   });
 
   return (
-    <div>
-      <TaskInput userId={userId} setTasks={setTasks} />
-      
+    <div>      
       {error && (
         <div className="bg-red-100 text-red-700 p-3 rounded-md mb-4">
           {error}
@@ -763,6 +758,7 @@ const CalendarView = ({ userId }) => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [view, setView] = useState('month'); // 'month', 'week', or 'day'
   
   // Helper to get days in month
   const getDaysInMonth = (year, month) => {
@@ -789,31 +785,35 @@ const CalendarView = ({ userId }) => {
       setLoading(false);
     }
   };
-  
-  const goToPreviousMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+
+  // Navigation functions
+  const goToPrevious = () => {
+    const newDate = new Date(currentDate);
+    if (view === 'month') {
+      newDate.setMonth(currentDate.getMonth() - 1);
+    } else if (view === 'week') {
+      newDate.setDate(currentDate.getDate() - 7);
+    } else {
+      newDate.setDate(currentDate.getDate() - 1);
+    }
+    setCurrentDate(newDate);
   };
   
-  const goToNextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  const goToNext = () => {
+    const newDate = new Date(currentDate);
+    if (view === 'month') {
+      newDate.setMonth(currentDate.getMonth() + 1);
+    } else if (view === 'week') {
+      newDate.setDate(currentDate.getDate() + 7);
+    } else {
+      newDate.setDate(currentDate.getDate() + 1);
+    }
+    setCurrentDate(newDate);
   };
-  
-  // Calendar generation
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const daysInMonth = getDaysInMonth(year, month);
-  const firstDayOfMonth = getFirstDayOfMonth(year, month);
-  
-  // Create calendar days array
-  const days = [];
-  // Add empty cells for days before the 1st of the month
-  for (let i = 0; i < firstDayOfMonth; i++) {
-    days.push(null);
-  }
-  // Add days of the month
-  for (let i = 1; i <= daysInMonth; i++) {
-    days.push(i);
-  }
+
+  const goToToday = () => {
+    setCurrentDate(new Date());
+  };
   
   // Group tasks by date
   const tasksByDate = {};
@@ -828,23 +828,265 @@ const CalendarView = ({ userId }) => {
     }
   });
 
+  // Get week dates
+  const getWeekDates = (date) => {
+    const week = [];
+    const start = new Date(date);
+    start.setDate(start.getDate() - start.getDay());
+    
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
+      week.push(day);
+    }
+    return week;
+  };
+
+  // Get hours for day view
+  const getHourSlots = () => {
+    const slots = [];
+    for (let i = 0; i < 24; i++) {
+      slots.push(i);
+    }
+    return slots;
+  };
+
+  // Format time for day view
+  const formatTime = (hour) => {
+    return `${hour.toString().padStart(2, '0')}:00`;
+  };
+
+  // Render functions for different views
+  const renderMonthView = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const daysInMonth = getDaysInMonth(year, month);
+    const firstDayOfMonth = getFirstDayOfMonth(year, month);
+    
+    const days = [];
+    for (let i = 0; i < firstDayOfMonth; i++) {
+      days.push(null);
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(i);
+    }
+
+    return (
+      <div>
+        <div className="grid grid-cols-7 mb-2">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+            <div key={day} className="text-center font-medium text-gray-500 py-2">
+              {day}
+            </div>
+          ))}
+        </div>
+        
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((day, index) => {
+            if (day === null) {
+              return <div key={`empty-${index}`} className="h-24 bg-gray-50 rounded"></div>;
+            }
+            
+            const date = new Date(year, month, day);
+            const isToday = date.toDateString() === new Date().toDateString();
+            const dateStr = date.toDateString();
+            const dayTasks = tasksByDate[dateStr] || [];
+            
+            return (
+              <div 
+                key={`day-${day}`}
+                className={`h-24 border rounded p-1 relative overflow-hidden hover:bg-gray-50 transition-colors duration-200 ${
+                  isToday ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-gray-200'
+                }`}
+              >
+                <div className={`text-right font-medium ${isToday ? 'text-indigo-600' : 'text-gray-700'}`}>
+                  {day}
+                </div>
+                <div className="mt-1 overflow-y-auto max-h-16">
+                  {dayTasks.map(task => (
+                    <div 
+                      key={task.id}
+                      className={`text-xs p-1 mb-1 truncate rounded ${
+                        task.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800'
+                      }`}
+                      title={task.title}
+                    >
+                      {task.title}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderWeekView = () => {
+    const weekDates = getWeekDates(currentDate);
+    
+    return (
+      <div className="overflow-x-auto">
+        <div className="grid grid-cols-7 gap-2">
+          {weekDates.map((date, index) => {
+            const isToday = date.toDateString() === new Date().toDateString();
+            const dateStr = date.toDateString();
+            const dayTasks = tasksByDate[dateStr] || [];
+            
+            return (
+              <div 
+                key={index}
+                className={`min-h-[600px] border rounded-lg p-2 ${
+                  isToday ? 'bg-indigo-50 border-indigo-300' : 'bg-white'
+                }`}
+              >
+                <div className={`text-center p-2 font-medium ${
+                  isToday ? 'text-indigo-600' : 'text-gray-700'
+                }`}>
+                  <div>{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()]}</div>
+                  <div className="text-lg">{date.getDate()}</div>
+                </div>
+                <div className="space-y-2">
+                  {dayTasks.map(task => (
+                    <div
+                      key={task.id}
+                      className={`p-2 rounded-md text-sm ${
+                        task.completed 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-indigo-100 text-indigo-800'
+                      }`}
+                    >
+                      <div className="font-medium truncate">{task.title}</div>
+                      <div className="text-xs mt-1">
+                        {new Date(task.deadline).toLocaleTimeString([], { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDayView = () => {
+    const hours = getHourSlots();
+    const dateStr = currentDate.toDateString();
+    const dayTasks = tasksByDate[dateStr] || [];
+    
+    return (
+      <div className="bg-white rounded-lg shadow">
+        <div className={`text-center p-4 font-medium ${
+          currentDate.toDateString() === new Date().toDateString() 
+            ? 'text-indigo-600' 
+            : 'text-gray-700'
+        }`}>
+          <div className="text-xl">
+            {currentDate.toLocaleDateString(undefined, { 
+              weekday: 'long', 
+              month: 'long', 
+              day: 'numeric' 
+            })}
+          </div>
+        </div>
+        <div className="divide-y">
+          {hours.map(hour => {
+            const hourTasks = dayTasks.filter(task => {
+              const taskHour = new Date(task.deadline).getHours();
+              return taskHour === hour;
+            });
+            
+            return (
+              <div key={hour} className="flex min-h-[60px] group hover:bg-gray-50">
+                <div className="w-20 py-2 px-4 text-right text-sm text-gray-500">
+                  {formatTime(hour)}
+                </div>
+                <div className="flex-1 py-2 px-4 border-l">
+                  {hourTasks.map(task => (
+                    <div
+                      key={task.id}
+                      className={`p-2 rounded-md text-sm mb-2 ${
+                        task.completed 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-indigo-100 text-indigo-800'
+                      }`}
+                    >
+                      <div className="font-medium">{task.title}</div>
+                      <div className="text-xs mt-1">
+                        {new Date(task.deadline).toLocaleTimeString([], { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-center mb-6 space-y-4 sm:space-y-0">
         <h2 className="text-xl font-semibold text-gray-800">Calendar View</h2>
+        
+        {/* View Selection */}
+        <div className="flex items-center space-x-4">
+          <div className="bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setView('month')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors duration-200 ${
+                view === 'month' ? 'bg-white text-indigo-600 shadow' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Month
+            </button>
+            <button
+              onClick={() => setView('week')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors duration-200 ${
+                view === 'week' ? 'bg-white text-indigo-600 shadow' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Week
+            </button>
+            <button
+              onClick={() => setView('day')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors duration-200 ${
+                view === 'day' ? 'bg-white text-indigo-600 shadow' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Day
+            </button>
+          </div>
+        </div>
+        
+        {/* Navigation Controls */}
         <div className="flex items-center space-x-4">
           <button
-            onClick={goToPreviousMonth}
-            className="p-2 rounded-md hover:bg-gray-100"
+            onClick={goToPrevious}
+            className="p-2 rounded-md hover:bg-gray-100 transition-colors duration-200"
           >
             &lt;
           </button>
-          <h3 className="text-lg font-medium">
-            {currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
-          </h3>
           <button
-            onClick={goToNextMonth}
-            className="p-2 rounded-md hover:bg-gray-100"
+            onClick={goToToday}
+            className="px-3 py-1 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors duration-200"
+          >
+            Today
+          </button>
+          <button
+            onClick={goToNext}
+            className="p-2 rounded-md hover:bg-gray-100 transition-colors duration-200"
           >
             &gt;
           </button>
@@ -858,54 +1100,9 @@ const CalendarView = ({ userId }) => {
         </div>
       ) : (
         <div>
-          {/* Calendar header */}
-          <div className="grid grid-cols-7 mb-2">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <div key={day} className="text-center font-medium text-gray-500 py-2">
-                {day}
-              </div>
-            ))}
-          </div>
-          
-          {/* Calendar grid */}
-          <div className="grid grid-cols-7 gap-1">
-            {days.map((day, index) => {
-              if (day === null) {
-                return <div key={`empty-${index}`} className="h-24 bg-gray-50 rounded"></div>;
-              }
-              
-              const date = new Date(year, month, day);
-              const isToday = date.toDateString() === new Date().toDateString();
-              const dateStr = date.toDateString();
-              const dayTasks = tasksByDate[dateStr] || [];
-              
-              return (
-                <div 
-                  key={`day-${day}`}
-                  className={`h-24 border rounded p-1 relative overflow-hidden ${
-                    isToday ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-gray-200'
-                  }`}
-                >
-                  <div className={`text-right font-medium ${isToday ? 'text-indigo-600' : 'text-gray-700'}`}>
-                    {day}
-                  </div>
-                  <div className="mt-1 overflow-y-auto max-h-16">
-                    {dayTasks.map(task => (
-                      <div 
-                        key={task.id}
-                        className={`text-xs p-1 mb-1 truncate rounded ${
-                          task.completed ? 'bg-green-100 text-green-800' : 'bg-indigo-100 text-indigo-800'
-                        }`}
-                        title={task.title}
-                      >
-                        {task.title}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {view === 'month' && renderMonthView()}
+          {view === 'week' && renderWeekView()}
+          {view === 'day' && renderDayView()}
         </div>
       )}
     </div>
@@ -1104,7 +1301,7 @@ function App() {
   const [loadingUser, setLoadingUser] = useState(true);
   const [userError, setUserError] = useState("");
   const [activeTab, setActiveTab] = useState("tasks");
-  // API constant is defined globally at the top of this file
+  const [tasks, setTasks] = useState([]);
 
   useEffect(() => {
     const setupDefaultUser = async () => {
@@ -1117,13 +1314,11 @@ function App() {
         let usernameToSet;
 
         try {
-          // Check if "default-user" exists by name
           const checkResponse = await axios.get(`${API}/users/name/${defaultUsername}`);
           if (checkResponse.data && checkResponse.data.id) {
             userIdToSet = checkResponse.data.id;
             usernameToSet = checkResponse.data.username;
           } else {
-            console.warn("Default user check response was successful but data is not as expected. Proceeding to create.");
             throw new Error("Default user data not found in response, proceed to create.");
           }
         } catch (err) {
@@ -1133,8 +1328,7 @@ function App() {
             userIdToSet = createResponse.data.id;
             usernameToSet = createResponse.data.username;
           } else {
-            console.error("Error checking/creating default user:", err);
-            throw err; // Re-throw to be caught by the outer catch
+            throw err;
           }
         }
         
@@ -1157,7 +1351,21 @@ function App() {
     } else {
       setupDefaultUser();
     }
-  }, []); // Runs once on mount
+  }, []);
+
+  useEffect(() => {
+    if (userId) {
+      const fetchTasks = async () => {
+        try {
+          const response = await axios.get(`${API}/tasks/user/${userId}`);
+          setTasks(response.data);
+        } catch (err) {
+          console.error("Error fetching tasks:", err);
+        }
+      };
+      fetchTasks();
+    }
+  }, [userId]);
 
   if (loadingUser) {
     return (
@@ -1193,21 +1401,19 @@ function App() {
   }
   
   if (!userId) {
-    // This state should ideally not be reached if loadingUser or userError is true.
-    // It acts as a fallback if user setup completes without setting userId and without an error.
     return (
-         <div className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
-              <h2 className="text-2xl font-bold text-orange-600 mb-4">Initialization Incomplete</h2>
-              <p className="text-gray-700 mb-6">Could not initialize user session. Please try refreshing the page.</p>
-              <button
-                onClick={() => window.location.reload()}
-                className="bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-300"
-              >
-                Refresh
-              </button>
-            </div>
-         </div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
+          <h2 className="text-2xl font-bold text-orange-600 mb-4">Initialization Incomplete</h2>
+          <p className="text-gray-700 mb-6">Could not initialize user session. Please try refreshing the page.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-300"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -1220,6 +1426,7 @@ function App() {
         {activeTab === "timeline" && <TimelineView userId={userId} />}
         {activeTab === "statistics" && <Statistics userId={userId} />}
       </main>
+      <TaskInput userId={userId} setTasks={setTasks} />
     </div>
   );
 }
