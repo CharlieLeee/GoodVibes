@@ -9,6 +9,7 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+*/yarn.lock
 
 # testing
 /coverage
@@ -40,6 +41,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+node_modules
+
+# python
+backend/venv
+*.pyc
 backend/__pycache__/server.cpython-39.pyc
 frontend/package-lock.json
 frontend/yarn.lock

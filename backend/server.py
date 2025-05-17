@@ -464,21 +464,30 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
     user = await db.users.find_one({"id": input_data.user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
+    
+    # Check if Together.ai API key is available
+    if not TOGETHER_API_KEY:
+        # Create a simple task without AI processing
+        task = Task(
+            user_id=input_data.user_id,
+            title=input_data.text,
+            description=input_data.text,
+            priority="medium"
+        )
+        task_dict = task.dict()
+        await db.tasks.insert_one(task_dict)
+        return task
+    
     # Process task with Together.ai
     task_analysis = await analyze_task_with_llm(input_data.text)
-
+    
     # Create deadline if provided
     deadline = None
-    if (
-        task_analysis.get("deadline")
-        and task_analysis["deadline"] != "not specified"
-        and task_analysis["deadline"] != "null"
-    ):
+    if task_analysis.get("deadline") and task_analysis["deadline"] != "not specified" and task_analysis["deadline"] != "null":
         try:
             # Try to parse the date - handle both full ISO and date-only formats
             date_str = task_analysis["deadline"]
-            if "T" in date_str:
+            if 'T' in date_str:
                 deadline = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
             else:
                 # For YYYY-MM-DD format, add time (end of day)
@@ -487,7 +496,7 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
             # If deadline parsing fails, log the error
             logging.error(f"Failed to parse deadline: {task_analysis['deadline']}")
             # Don't set a default deadline - we'll let the user set it manually if needed
-
+    
     # Create task
     task = Task(
         user_id=input_data.user_id,
@@ -495,22 +504,22 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
         description=input_data.text,
         deadline=deadline,
         priority=task_analysis.get("priority", "medium"),
-        emotional_support=task_analysis.get("emotional_support", ""),
+        emotional_support=task_analysis.get("emotional_support", "")
     )
-
+    
     # Create subtasks
     subtasks_data = task_analysis.get("subtasks", [])
     for i, subtask_item in enumerate(subtasks_data):
         # Handle both new format (object with description & deadline) and old format (string only)
         if isinstance(subtask_item, dict):
             subtask_desc = subtask_item.get("description", "")
-
+            
             # Process subtask deadline if provided
             subtask_deadline = None
             if subtask_item.get("deadline"):
                 try:
                     subtask_date_str = subtask_item["deadline"]
-                    if "T" in subtask_date_str:
+                    if 'T' in subtask_date_str:
                         subtask_deadline = datetime.fromisoformat(subtask_date_str.replace("Z", "+00:00"))
                     else:
                         # For YYYY-MM-DD format, add time (end of day)
@@ -522,10 +531,15 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
             # Handle legacy format (plain string)
             subtask_desc = str(subtask_item)
             subtask_deadline = None
-
-        subtask = Subtask(task_id=task.id, description=subtask_desc, deadline=subtask_deadline, order=i)
+            
+        subtask = Subtask(
+            task_id=task.id,
+            description=subtask_desc,
+            deadline=subtask_deadline,
+            order=i
+        )
         task.subtasks.append(subtask)
-
+    
     # Insert task
     task_dict = task.dict()
     await db.tasks.insert_one(task_dict)

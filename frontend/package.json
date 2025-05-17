@@ -5,9 +5,9 @@
   "dependencies": {
     "axios": "^1.8.4",
     "cra-template": "1.2.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-router-dom": "^7.5.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.3",
     "react-scripts": "5.0.1"
   },
   "scripts": {
@@ -29,13 +29,7 @@
     ]
   },
   "devDependencies": {
-    "@eslint/js": "9.23.0",
     "autoprefixer": "^10.4.20",
-    "eslint": "9.23.0",
-    "eslint-plugin-import": "2.31.0",
-    "eslint-plugin-jsx-a11y": "6.10.2",
-    "eslint-plugin-react": "7.37.4",
-    "globals": "15.15.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17"
   }
