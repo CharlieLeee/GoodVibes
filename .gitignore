@@ -49,3 +49,4 @@ backend/venv
 backend/__pycache__/server.cpython-39.pyc
 frontend/package-lock.json
 frontend/yarn.lock
+.env
