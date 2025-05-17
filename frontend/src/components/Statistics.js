@@ -36,6 +36,7 @@ const Statistics = ({ userId }) => {
   const [timeRange, setTimeRange] = useState('week'); // 'day', 'week', 'month', 'year'
   const [aiFeedback, setAiFeedback] = useState(null);
   const [aiFeedbackError, setAiFeedbackError] = useState(null);
+  const [aiFeedbackLoading, setAiFeedbackLoading] = useState(false);
   const chartRef = useRef(null);
   const [chartData, setChartData] = useState(null);
   const lastUpdateRef = useRef(null);
@@ -61,6 +62,7 @@ const Statistics = ({ userId }) => {
   // Function to fetch AI feedback
   const fetchAIFeedback = async () => {
     try {
+      setAiFeedbackLoading(true);
       setAiFeedbackError(null);
       const response = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/statistics/user/${userId}/feedback`);
       
@@ -76,6 +78,8 @@ const Statistics = ({ userId }) => {
       console.error('Error fetching AI feedback:', err);
       setAiFeedbackError('Unable to generate AI feedback at this time');
       setAiFeedback(null);
+    } finally {
+      setAiFeedbackLoading(false);
     }
   };
 
@@ -94,7 +98,7 @@ const Statistics = ({ userId }) => {
 
         // Fetch AI feedback only if needed
         if (shouldUpdateFeedback(tasksResponse.data)) {
-          await fetchAIFeedback();
+          fetchAIFeedback();
         }
       } catch (err) {
         setError('Failed to load statistics');
