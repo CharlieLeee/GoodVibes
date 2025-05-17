@@ -19,6 +19,40 @@ GoodVibes doesn't just track your tasks—it becomes your productivity partner! 
 - `frontend/` - React application with TypeScript
 - `backend/` - Python FastAPI application
 - `.devcontainer/` - Development container configuration
+- `config/` - Configuration files including API keys
+
+## Configuration
+
+Before starting the development environment or deploying the application, you need to set up your API keys. This configuration is required for both development and production environments.
+
+### API Keys
+
+GoodVibes requires a Together AI API key to function properly. This key is used for all AI features including task analysis, chat assistance, and motivation generation.
+
+#### Setting Up Your API Key
+
+1. Sign up for an account at [Together AI](https://www.together.ai/)
+2. Generate an API key from your dashboard
+3. Create the `config/api_keys.json` file in your project root:
+
+```json
+{
+  "TOGETHER_API_KEY": "your_actual_api_key_here",
+  "OTHER_API_KEYS": {
+    "comment": "Add any other API keys here as needed"
+  }
+}
+```
+
+> **Important:** Make sure to create this file and add your API key **before** starting the dev container or deploying the application.
+
+#### Validating Your Configuration
+
+You can manually validate your API key by running:
+
+```bash
+python config/load_api_keys.py
+```
 
 ## Development Setup
 
@@ -29,7 +63,9 @@ This project uses VS Code Dev Containers to provide a consistent development env
 - Python 3.11 with FastAPI dependencies
 - Node.js 18.x with React development tools
 - TypeScript support
+- MongoDB database
 - Pre-configured VS Code extensions and settings
+- Automatic environment setup
 
 #### Requirements
 
@@ -42,7 +78,15 @@ This project uses VS Code Dev Containers to provide a consistent development env
 1. Clone this repository
 2. Open the project folder in VS Code
 3. When prompted, click "Reopen in Container"
-4. Wait for the container to build and initialize
+4. Wait for the container to build and initialize (this may take a few minutes the first time)
+
+The container will automatically:
+
+- Set up MongoDB
+- Install all backend and frontend dependencies
+- Create necessary environment files
+- Configure the network to allow communication between services
+- Validate your API key configuration
 
 Alternatively, you can run the "Dev Containers: Reopen in Container" command from the VS Code Command Palette (F1).
 
@@ -53,6 +97,7 @@ For more detailed information about the development container setup, see the [De
 #### Prerequisites
 
 Before you begin, ensure you have the following installed:
+
 - Python 3.8 or higher
 - Node.js 14 or higher
 - npm (Node Package Manager)
@@ -61,31 +106,39 @@ Before you begin, ensure you have the following installed:
 #### Backend Setup
 
 1. Navigate to the backend directory:
+
 ```bash
 cd backend
 ```
 
 2. Create a virtual environment:
+
 ```bash
 python -m venv venv
 ```
 
 3. Activate the virtual environment:
+
 - On Windows:
+
 ```bash
 .\venv\Scripts\activate
 ```
+
 - On macOS/Linux:
+
 ```bash
 source venv/bin/activate
 ```
 
 4. Install required Python packages:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 5. Start the backend server:
+
 ```bash
 uvicorn server:app --reload
 ```
@@ -95,16 +148,19 @@ The backend server will start running at `http://localhost:8000`.
 #### Frontend Setup
 
 1. Open a new terminal and navigate to the frontend directory:
+
 ```bash
 cd frontend
 ```
 
 2. Install required npm packages:
+
 ```bash
 npm install
 ```
 
 3. Start the frontend development server:
+
 ```bash
 npm start
 ```
@@ -117,7 +173,7 @@ The frontend development server will start running at `http://localhost:3000`.
 
 ```bash
 cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn server:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at http://localhost:8000
@@ -133,33 +189,65 @@ The React application will be available at http://localhost:3000
 
 ## Environment Variables
 
-The application uses environment variables for configuration. Create a `.env` file in both the backend and frontend directories with the following variables:
+The application uses environment variables for configuration, which are automatically populated from the centralized configuration in `config/api_keys.json`.
 
-### Backend (.env)
+### Environment Files
+
+The setup scripts automatically copy values from the centralized configuration to the appropriate environment files:
+
+- `backend/.env` - For backend environment variables
+- `frontend/.env` - For frontend environment variables
+
+### MongoDB Configuration
+
+The backend requires MongoDB. In the development container, MongoDB is automatically set up with these default values:
+
 ```
-DATABASE_URL=sqlite:///./tasks.db
+MONGO_URL=mongodb://mongodb:27017/goodvibes
+DB_NAME=goodvibes
 ```
 
-### Frontend (.env)
+For manual setup, you'll need to configure MongoDB:
+
+1. Install MongoDB locally
+2. Use MongoDB Atlas (cloud service)
+3. Use Docker to run MongoDB with: `docker run -d -p 27017:27017 --name mongodb mongo:latest`
+
+Then update your `backend/.env` file with the appropriate connection details.
+
+### Additional Environment Variables
+
+Additional environment variables can be set in the appropriate `.env` files:
+
 ```
+# backend/.env
+DEBUG=False
+LOG_LEVEL=INFO
+```
+
+```
+# frontend/.env
 REACT_APP_BACKEND_URL=http://localhost:8000
 ```
 
 ## API Documentation
 
 The backend API documentation is available at:
+
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
 ## Testing
 
 ### Backend Tests
+
 ```bash
 cd backend
 pytest
 ```
 
 ### Frontend Tests
+
 ```bash
 cd frontend
 npm test
@@ -167,7 +255,11 @@ npm test
 
 ## Deployment
 
-Production deployment files are located in the `deployment` directory. See [Deployment README](deployment/README.md) for detailed instructions on how to build and deploy the application using Docker.
+Production deployment files are located in the `deployment` directory.
+
+Before deployment, ensure you have set up the API keys as described in the [Configuration](#configuration) section.
+
+See [Deployment README](deployment/README.md) for detailed instructions on how to build and deploy the application using Docker.
 
 ## License
 

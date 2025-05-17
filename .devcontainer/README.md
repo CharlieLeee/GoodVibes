@@ -35,7 +35,7 @@ From the terminal in VS Code:
 
 ```bash
 cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn server:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at http://localhost:8000
@@ -57,4 +57,4 @@ You can customize this dev container by:
 
 - Modifying `.devcontainer/Dockerfile` to add additional system dependencies
 - Editing `.devcontainer/devcontainer.json` to change VS Code settings or add extensions
-- Adjusting the `postCreateCommand` in `devcontainer.json` to install additional dependencies 
+- Adjusting the `postCreateCommand` in `devcontainer.json` to install additional dependencies

@@ -1,9 +1,8 @@
 {
-	"name": "Python FastAPI + Node.js/React",
-	"build": {
-		"dockerfile": "Dockerfile",
-		"context": ".."
-	},
+	"name": "Python FastAPI + Node.js/React + MongoDB",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
 
 	// Configure tool-specific properties
 	"customizations": {
@@ -24,23 +23,34 @@
 				"editor.formatOnSave": true,
 				"editor.codeActionsOnSave": {
 					"source.organizeImports": true
-				}
+				},
+				"terminal.integrated.defaultProfile.linux": "bash"
 			},
 			"extensions": [
 				"ms-python.python",
 				"ms-python.vscode-pylance",
 				"dbaeumer.vscode-eslint",
-				"esbenp.prettier-vscode"
+				"esbenp.prettier-vscode",
+				"mongodb.mongodb-vscode"
 			]
 		}
 	},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	"forwardPorts": [3000, 8000],
+	"forwardPorts": [3000, 8000, 27017],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "pip install -r backend/requirements.txt && cd frontend && npm install",
+	"postCreateCommand": "bash .devcontainer/setup.sh",
 
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
-	"remoteUser": "vscode"
+	"remoteUser": "vscode",
+    
+    // Add features to enhance the development environment
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": true,
+            "installOhMyZsh": true,
+            "upgradePackages": true
+        }
+    }
 } 
