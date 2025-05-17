@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import axios from "axios";
 import "./App.css";
+import Statistics from './components/Statistics';
 
 // API configuration
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -49,6 +50,14 @@ const Navigation = ({ activeTab, setActiveTab, userId }) => {
               onClick={() => setActiveTab("timeline")}
             >
               Timeline
+            </button>
+            <button
+              className={`px-3 py-1 rounded-md ${
+                activeTab === "statistics" ? "bg-indigo-800" : "hover:bg-indigo-700"
+              }`}
+              onClick={() => setActiveTab("statistics")}
+            >
+              Statistics
             </button>
           </div>
         )}
@@ -1083,6 +1092,7 @@ const Dashboard = ({ userId }) => {
         {activeTab === "tasks" && <TasksList userId={userId} />}
         {activeTab === "calendar" && <CalendarView userId={userId} />}
         {activeTab === "timeline" && <TimelineView userId={userId} />}
+        {activeTab === "statistics" && <Statistics userId={userId} />}
       </div>
     </div>
   );
@@ -1208,6 +1218,7 @@ function App() {
         {activeTab === "tasks" && <TasksList userId={userId} />}
         {activeTab === "calendar" && <CalendarView userId={userId} />}
         {activeTab === "timeline" && <TimelineView userId={userId} />}
+        {activeTab === "statistics" && <Statistics userId={userId} />}
       </main>
     </div>
   );

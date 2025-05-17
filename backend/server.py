@@ -105,6 +105,23 @@ class EmotionalSupportType(BaseModel):
     task_id: str
 
 
+# Statistics Models
+class TaskStatistics(BaseModel):
+    total_tasks: int
+    completed_tasks: int
+    completion_rate: float
+    tasks_by_priority: Dict[str, int]
+    tasks_by_status: Dict[str, int]
+    recent_completions: List[Task]
+    average_completion_time: Optional[float]  # in hours
+    total_subtasks: int
+    completed_subtasks: int
+    subtask_completion_rate: float
+    subtasks_by_priority: Dict[str, int]
+    subtasks_by_status: Dict[str, int]
+    average_subtasks_per_task: float
+
+
 # Together.ai integration functions
 async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     """Use Together.ai to analyze a natural language task input and break it down"""
@@ -561,6 +578,89 @@ async def get_emotional_support(task_id: str):
     await db.tasks.update_one({"id": task_id}, {"$set": {"emotional_support": support_message}})
 
     return {"message": support_message, "task_id": task_id}
+
+
+# Statistics API routes
+@api_router.get("/statistics/user/{user_id}", response_model=TaskStatistics)
+async def get_user_statistics(user_id: str):
+    # Get all tasks for the user
+    tasks = await db.tasks.find({"user_id": user_id}).to_list(1000)
+    tasks = [Task(**task) for task in tasks]
+    
+    # Calculate basic statistics
+    total_tasks = len(tasks)
+    completed_tasks = sum(1 for task in tasks if task.completed)
+    completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+    
+    # Tasks by priority
+    tasks_by_priority = {
+        "high": sum(1 for task in tasks if task.priority == "high"),
+        "medium": sum(1 for task in tasks if task.priority == "medium"),
+        "low": sum(1 for task in tasks if task.priority == "low")
+    }
+    
+    # Tasks by status
+    tasks_by_status = {
+        "completed": completed_tasks,
+        "in_progress": total_tasks - completed_tasks
+    }
+    
+    # Recent completions (last 7 days)
+    one_week_ago = datetime.utcnow() - timedelta(days=7)
+    recent_completions = [
+        task for task in tasks 
+        if task.completed and task.updated_at >= one_week_ago
+    ]
+    
+    # Calculate average completion time
+    completion_times = []
+    for task in tasks:
+        if task.completed and task.created_at and task.updated_at:
+            completion_time = (task.updated_at - task.created_at).total_seconds() / 3600  # in hours
+            completion_times.append(completion_time)
+    
+    average_completion_time = sum(completion_times) / len(completion_times) if completion_times else None
+
+    # Calculate subtask statistics
+    all_subtasks = []
+    for task in tasks:
+        all_subtasks.extend(task.subtasks)
+    
+    total_subtasks = len(all_subtasks)
+    completed_subtasks = sum(1 for subtask in all_subtasks if subtask.completed)
+    subtask_completion_rate = (completed_subtasks / total_subtasks * 100) if total_subtasks > 0 else 0
+    
+    # Subtasks by priority (using parent task's priority)
+    subtasks_by_priority = {
+        "high": sum(len([st for st in task.subtasks if task.priority == "high"]) for task in tasks),
+        "medium": sum(len([st for st in task.subtasks if task.priority == "medium"]) for task in tasks),
+        "low": sum(len([st for st in task.subtasks if task.priority == "low"]) for task in tasks)
+    }
+    
+    # Subtasks by status
+    subtasks_by_status = {
+        "completed": completed_subtasks,
+        "in_progress": total_subtasks - completed_subtasks
+    }
+    
+    # Average subtasks per task
+    average_subtasks_per_task = total_subtasks / total_tasks if total_tasks > 0 else 0
+    
+    return TaskStatistics(
+        total_tasks=total_tasks,
+        completed_tasks=completed_tasks,
+        completion_rate=completion_rate,
+        tasks_by_priority=tasks_by_priority,
+        tasks_by_status=tasks_by_status,
+        recent_completions=recent_completions,
+        average_completion_time=average_completion_time,
+        total_subtasks=total_subtasks,
+        completed_subtasks=completed_subtasks,
+        subtask_completion_rate=subtask_completion_rate,
+        subtasks_by_priority=subtasks_by_priority,
+        subtasks_by_status=subtasks_by_status,
+        average_subtasks_per_task=average_subtasks_per_task
+    )
 
 
 # Add your routes to the router instead of directly to app
