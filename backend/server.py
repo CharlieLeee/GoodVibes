@@ -39,6 +39,15 @@ TOGETHER_API_URL = "https://api.together.xyz/v1/completions"
 # Create the main app without a prefix
 app = FastAPI(title="AI Task Assistant API")
 
+# Add CORS middleware before including the router
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
@@ -395,17 +404,19 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     1. A clear task title
     2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
        - Each subtask MUST include a 'title', a 'description', and a 'deadline' field
-    3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DD format)
+       - Each deadline MUST include a specific time (HH:MM) in 24-hour format
+    3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DDTHH:MM format)
     4. A priority level (low, medium, high)
     5. A brief encouraging message to help the user stay motivated
     
-    Important instructions about dates:
+    Important instructions about dates and times:
     - Today's date is {current_date_str}
-    - If a specific date is mentioned (like "June 15th"), use that as the final deadline
-    - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date
-    - If a relative time is mentioned (like "in 3 days"), calculate the date based on today
+    - All deadlines MUST include specific times in 24-hour format (HH:MM)
+    - If a specific date is mentioned (like "June 15th"), use that date with a reasonable time (e.g., "2024-06-15T17:00")
+    - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date and use a reasonable time
+    - If a relative time is mentioned (like "in 3 days"), calculate the date based on today and use a reasonable time
     - For subtask deadlines, distribute them evenly between {current_date_str} and the final deadline
-    - Always return dates in ISO format (YYYY-MM-DD)
+    - Always return dates in ISO format with time (YYYY-MM-DDTHH:MM)
     - If no deadline is mentioned, set deadline to null
     
     Format your response as a JSON object with these keys: 
@@ -415,13 +426,13 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     {{
         "title": "Write quarterly report",
         "subtasks": [
-            {{ "title": "Collect sales data", "description": "Gather all sales data from Q1", "deadline": "2025-04-01" }},
-            {{ "title": "Analyze market trends", "description": "Review competitor performance", "deadline": "2025-04-05" }},
-            {{ "title": "Create charts and graphs", "description": "Visualize key metrics", "deadline": "2025-04-10" }},
-            {{ "title": "Write executive summary", "description": "Summarize findings", "deadline": "2025-04-12" }},
-            {{ "title": "Proofread and finalize", "description": "Check for errors and finalize report", "deadline": "2025-04-14" }}
+            {{ "title": "Collect sales data", "description": "Gather all sales data from Q1", "deadline": "2025-04-01T14:00" }},
+            {{ "title": "Analyze market trends", "description": "Review competitor performance", "deadline": "2025-04-05T16:30" }},
+            {{ "title": "Create charts and graphs", "description": "Visualize key metrics", "deadline": "2025-04-10T15:00" }},
+            {{ "title": "Write executive summary", "description": "Summarize findings", "deadline": "2025-04-12T17:00" }},
+            {{ "title": "Proofread and finalize", "description": "Check for errors and finalize report", "deadline": "2025-04-14T16:00" }}
         ],
-        "deadline": "2025-04-15",
+        "deadline": "2025-04-15T17:00",
         "priority": "high",
         "emotional_support": "You've got this! Breaking down this report makes it much more manageable."
     }}
@@ -1387,6 +1398,9 @@ async def get_user_statistics_feedback(user_id: str):
 async def root():
     return {"message": "AI Task Assistant API"}
 
+
+# Include the router in the main app
+app.include_router(api_router)
 # Add CORS middleware BEFORE including the router
 app.add_middleware(
     CORSMiddleware,
