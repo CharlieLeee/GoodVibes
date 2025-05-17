@@ -36,6 +36,7 @@ const Statistics = ({ userId }) => {
   const [timeRange, setTimeRange] = useState('week'); // 'day', 'week', 'month', 'year'
   const [aiFeedback, setAiFeedback] = useState(null);
   const [aiFeedbackError, setAiFeedbackError] = useState(null);
+  const [aiFeedbackLoading, setAiFeedbackLoading] = useState(false);
   const chartRef = useRef(null);
   const [chartData, setChartData] = useState(null);
   const lastUpdateRef = useRef(null);
@@ -61,6 +62,7 @@ const Statistics = ({ userId }) => {
   // Function to fetch AI feedback
   const fetchAIFeedback = async () => {
     try {
+      setAiFeedbackLoading(true);
       setAiFeedbackError(null);
       const response = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/statistics/user/${userId}/feedback`);
       
@@ -76,6 +78,8 @@ const Statistics = ({ userId }) => {
       console.error('Error fetching AI feedback:', err);
       setAiFeedbackError('Unable to generate AI feedback at this time');
       setAiFeedback(null);
+    } finally {
+      setAiFeedbackLoading(false);
     }
   };
 
@@ -94,7 +98,7 @@ const Statistics = ({ userId }) => {
 
         // Fetch AI feedback only if needed
         if (shouldUpdateFeedback(tasksResponse.data)) {
-          await fetchAIFeedback();
+          fetchAIFeedback();
         }
       } catch (err) {
         setError('Failed to load statistics');
@@ -265,73 +269,81 @@ const Statistics = ({ userId }) => {
   return (
     <div className="p-6">
       {/* AI Feedback Section */}
-      {aiFeedback && !aiFeedbackError && (
-        <div className="mb-8 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-sm">
-          <div className="p-6">
-            <div className="flex items-start space-x-4">
-              <div className="flex-shrink-0">
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+      <div className="mb-12">
+        <h2 className="text-2xl font-bold mb-6">AI Analysis</h2>
+        {aiFeedbackLoading ? (
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-center space-x-2">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <span className="text-gray-600">Generating AI feedback...</span>
+            </div>
+          </div>
+        ) : aiFeedback && !aiFeedbackError ? (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-sm">
+            <div className="p-6">
+              <div className="flex items-start space-x-4">
+                <div className="flex-shrink-0">
+                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{aiFeedback.summary}</h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Key Insights</h4>
+                      <ul className="space-y-2">
+                        {aiFeedback.insights.map((insight, index) => (
+                          <li key={index} className="flex items-start">
+                            <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-blue-500 rounded-full"></span>
+                            <span className="ml-2 text-sm text-gray-600">{insight}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Suggestions</h4>
+                      <ul className="space-y-2">
+                        {aiFeedback.suggestions.map((suggestion, index) => (
+                          <li key={index} className="flex items-start">
+                            <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-green-500 rounded-full"></span>
+                            <span className="ml-2 text-sm text-gray-600">{suggestion}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : aiFeedbackError ? (
+          <div className="bg-yellow-50 rounded-lg shadow-sm">
+            <div className="p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                   </svg>
                 </div>
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">{aiFeedback.summary}</h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Key Insights</h4>
-                    <ul className="space-y-2">
-                      {aiFeedback.insights.map((insight, index) => (
-                        <li key={index} className="flex items-start">
-                          <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-blue-500 rounded-full"></span>
-                          <span className="ml-2 text-sm text-gray-600">{insight}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Suggestions</h4>
-                    <ul className="space-y-2">
-                      {aiFeedback.suggestions.map((suggestion, index) => (
-                        <li key={index} className="flex items-start">
-                          <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 bg-green-500 rounded-full"></span>
-                          <span className="ml-2 text-sm text-gray-600">{suggestion}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">{aiFeedbackError}</p>
+                  <button
+                    onClick={fetchAIFeedback}
+                    className="mt-2 text-sm text-yellow-700 hover:text-yellow-800 underline"
+                  >
+                    Try Again
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {aiFeedbackError && (
-        <div className="mb-8 bg-yellow-50 rounded-lg shadow-sm">
-          <div className="p-4">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-yellow-700">{aiFeedbackError}</p>
-                <button
-                  onClick={fetchAIFeedback}
-                  className="mt-2 text-sm text-yellow-700 hover:text-yellow-800 underline"
-                >
-                  Try Again
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        ) : null}
+      </div>
 
       {/* Overall Completion Trends Section */}
       <div className="mb-12">
