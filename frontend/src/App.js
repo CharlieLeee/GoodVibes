@@ -16,7 +16,22 @@ const formatDate = (dateString) => {
     month: "short",
     day: "numeric",
     year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true
   }).format(date);
+};
+
+// Helper function to format date for input fields
+const formatDateForInput = (dateString) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 // Navigation component
@@ -389,13 +404,13 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
   const [loadingSupport, setLoadingSupport] = useState(false);
   const [editingDate, setEditingDate] = useState(false);
   const [newDueDate, setNewDueDate] = useState(
-    task.deadline ? new Date(task.deadline).toISOString().split('T')[0] : ""
+    task.deadline ? formatDateForInput(task.deadline) : ""
   );
   
   // When the task prop changes, update the due date state but preserve expanded state
   useEffect(() => {
     if (task.deadline) {
-      setNewDueDate(new Date(task.deadline).toISOString().split('T')[0]);
+      setNewDueDate(formatDateForInput(task.deadline));
     }
     if (task.emotional_support) {
       setEmotionalSupport(task.emotional_support);
@@ -445,15 +460,11 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
     if (!newDueDate) return;
     
     try {
-      // Convert date string to ISO format with time
       const dateObj = new Date(newDueDate);
-      dateObj.setHours(23, 59, 59);
-      
       await updateTask(task.id, { 
-        deadline: dateObj.toISOString() 
+        deadline: dateObj.toISOString()
       });
       setEditingDate(false);
-      // Removed refreshTasks() to prevent unnecessary reloads and state loss
     } catch (err) {
       console.error("Error updating due date:", err);
     }
@@ -493,7 +504,7 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
                 {editingDate ? (
                   <div className="flex items-center space-x-2">
                     <input
-                      type="date"
+                      type="datetime-local"
                       value={newDueDate}
                       onChange={(e) => setNewDueDate(e.target.value)}
                       className="text-sm border border-gray-300 rounded px-2 py-1"
@@ -959,10 +970,7 @@ const CalendarView = ({ userId }) => {
                     >
                       <div className="font-medium truncate">{task.title}</div>
                       <div className="text-xs mt-1">
-                        {new Date(task.deadline).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
+                        {formatDate(task.deadline)}
                       </div>
                     </div>
                   ))}
@@ -1019,10 +1027,7 @@ const CalendarView = ({ userId }) => {
                     >
                       <div className="font-medium">{task.title}</div>
                       <div className="text-xs mt-1">
-                        {new Date(task.deadline).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
+                        {formatDate(task.deadline)}
                       </div>
                     </div>
                   ))}
