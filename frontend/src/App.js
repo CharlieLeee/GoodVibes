@@ -16,51 +16,52 @@ const formatDate = (dateString) => {
     month: "short",
     day: "numeric",
     year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true
   }).format(date);
+};
+
+// Helper function to format date for input fields
+const formatDateForInput = (dateString) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 // Navigation component
 const Navigation = ({ activeTab, setActiveTab, userId }) => {
   return (
-    <nav className="bg-indigo-600 text-white p-4">
-      <div className="container mx-auto flex justify-between items-center">
-        <h1 className="text-xl font-bold">AI Task Assistant</h1>
-        {userId && (
-          <div className="flex space-x-4">
-            <button
-              className={`px-3 py-1 rounded-md ${
-                activeTab === "tasks" ? "bg-indigo-800" : "hover:bg-indigo-700"
-              }`}
-              onClick={() => setActiveTab("tasks")}
-            >
-              Tasks
-            </button>
-            <button
-              className={`px-3 py-1 rounded-md ${
-                activeTab === "calendar" ? "bg-indigo-800" : "hover:bg-indigo-700"
-              }`}
-              onClick={() => setActiveTab("calendar")}
-            >
-              Calendar
-            </button>
-            <button
-              className={`px-3 py-1 rounded-md ${
-                activeTab === "timeline" ? "bg-indigo-800" : "hover:bg-indigo-700"
-              }`}
-              onClick={() => setActiveTab("timeline")}
-            >
-              Timeline
-            </button>
-            <button
-              className={`px-3 py-1 rounded-md ${
-                activeTab === "statistics" ? "bg-indigo-800" : "hover:bg-indigo-700"
-              }`}
-              onClick={() => setActiveTab("statistics")}
-            >
-              Statistics
-            </button>
-          </div>
-        )}
+    <nav className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
+      <div className="container mx-auto px-6 py-4">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold flex items-center space-x-2">
+            <span className="text-3xl">🌊</span>
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-white to-indigo-100">GoodVibes</span>
+          </h1>
+          {userId && (
+            <div className="flex space-x-2">
+              {['tasks', 'calendar', 'timeline', 'statistics'].map((tab) => (
+                <button
+                  key={tab}
+                  className={`px-4 py-2 rounded-lg transition-all duration-200 ${
+                    activeTab === tab 
+                      ? 'bg-white/10 text-white shadow-inner' 
+                      : 'hover:bg-white/5 text-white/90'
+                  }`}
+                  onClick={() => setActiveTab(tab)}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </nav>
   );
@@ -73,9 +74,6 @@ const TaskInput = ({ userId, setTasks }) => {
   const [error, setError] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState("");
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isHovering, setIsHovering] = useState(false);
-  const hoverTimeoutRef = useRef(null);
   const panelRef = useRef(null);
   const recognition = useRef(null);
 
@@ -113,31 +111,6 @@ const TaskInput = ({ userId, setTasks }) => {
         setIsListening(false);
       };
     }
-
-    // Add mouse move event listener
-    const handleMouseMove = (e) => {
-      const windowWidth = window.innerWidth;
-      const triggerDistance = 100; // Distance from the right edge to trigger hover
-      
-      if (windowWidth - e.clientX <= triggerDistance) {
-        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-        setIsHovering(true);
-        setIsExpanded(true);
-      } else if (!panelRef.current?.contains(e.target)) {
-        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-        hoverTimeoutRef.current = setTimeout(() => {
-          setIsHovering(false);
-          setIsExpanded(false);
-        }, 300); // Delay before hiding
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    };
   }, []);
 
   const toggleListening = () => {
@@ -146,22 +119,15 @@ const TaskInput = ({ userId, setTasks }) => {
       return;
     }
 
-    try {
-      if (isListening) {
-        recognition.current.stop();
-        setInterimTranscript('');
-        setIsListening(false);
-      } else {
-        setError("");
-        setInterimTranscript('');
-        recognition.current.start();
-        setIsListening(true);
-      }
-    } catch (error) {
-      console.error('Speech recognition error:', error);
-      setIsListening(false);
-      setError("Failed to toggle voice recording. Please try again.");
+    if (isListening) {
+      recognition.current.stop();
       setInterimTranscript('');
+      setIsListening(false);
+    } else {
+      setError("");
+      setInterimTranscript('');
+      recognition.current.start();
+      setIsListening(true);
     }
   };
 
@@ -171,6 +137,13 @@ const TaskInput = ({ userId, setTasks }) => {
     if (!taskText.trim()) {
       setError("Please enter a task");
       return;
+    }
+
+    // Stop recording if active
+    if (isListening) {
+      recognition.current?.stop();
+      setIsListening(false);
+      setInterimTranscript('');
     }
     
     setProcessing(true);
@@ -185,8 +158,6 @@ const TaskInput = ({ userId, setTasks }) => {
       setTasks(prevTasks => [response.data, ...prevTasks]);
       setTaskText("");
       setInterimTranscript('');
-      setIsExpanded(false);
-      setIsHovering(false);
     } catch (err) {
       console.error("Error processing task:", err);
       setError("Failed to process task. Please try again.");
@@ -277,95 +248,78 @@ const TaskInput = ({ userId, setTasks }) => {
 
   return (
     <>
-      {/* Persistent visual indicator */}
-      <div className="fixed right-0 top-1/2 -translate-y-1/2 flex items-center">
-        <div 
-          className={`bg-gradient-to-l from-indigo-600/20 to-transparent w-1.5 h-24 rounded-l transition-all duration-300 ${
-            isExpanded ? 'opacity-0' : 'opacity-100'
-          }`}
-        />
-        <div 
-          className={`absolute right-2 transform -translate-y-1/2 bg-white/90 backdrop-blur-sm shadow-lg rounded-full p-2 transition-all duration-300 ${
-            isExpanded ? 'opacity-0' : 'opacity-100 hover:scale-110'
-          }`}
-        >
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            className="h-5 w-5 text-indigo-600" 
-            fill="none" 
-            viewBox="0 0 24 24" 
-            stroke="currentColor"
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={2} 
-              d="M12 4v16m8-8H4" 
-            />
-          </svg>
-        </div>
-      </div>
-
-      {/* Main panel */}
       <div 
-        ref={panelRef}
-        className={`fixed right-0 top-0 h-full w-96 bg-white shadow-2xl transform transition-all duration-300 ease-in-out ${
-          isExpanded ? 'translate-x-0' : 'translate-x-full'
-        }`}
-        onMouseEnter={() => {
-          if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-          setIsHovering(true);
-          setIsExpanded(true);
+        className="fixed top-0 right-0 h-screen w-96 flex items-stretch z-40"
+        style={{ 
+          position: 'fixed',
+          top: '73px',
+          right: '12px',
+          bottom: '12px',
+          height: 'calc(100vh - 85px)',
+          width: '374px',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.7))',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          boxShadow: '0 4px 24px -2px rgba(0, 0, 0, 0.02), 0 0 0 1px rgba(255, 255, 255, 0.3)',
+          borderRadius: '24px',
+          border: '1px solid rgba(255, 255, 255, 0.3)'
         }}
       >
-        <div className={`h-full overflow-y-auto transition-all duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>
-          <div className="p-8">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center space-x-4">
-                <div className="bg-gradient-to-r from-indigo-500 to-purple-500 p-3 rounded-xl shadow-lg">
-                  {isChatMode ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                    </svg>
-                  ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                  )}
-                </div>
-                <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                  {isChatMode ? "Chat Assistant" : "Create Task"}
-                </h2>
+        <div className="flex-shrink-0 p-8 rounded-t-2xl" style={{
+          background: 'linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.2))',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+        }}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-4">
+              <div className="bg-gradient-to-r from-indigo-500/80 to-purple-500/80 p-3 rounded-2xl shadow-sm backdrop-blur-sm">
+                {isChatMode ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white/90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white/90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>
+                )}
               </div>
-              <div className="flex">
-                <button
-                  type="button"
-                  onClick={toggleChatMode}
-                  className="text-sm font-medium px-4 py-2 rounded-full border border-indigo-200 bg-white hover:bg-indigo-50 transition-colors duration-300"
-                >
-                  {isChatMode ? "Create Task" : "Chat Mode"}
-                </button>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600/90 to-purple-600/90 bg-clip-text text-transparent">
+                {isChatMode ? "Chat Assistant" : "Create Task"}
+              </h2>
+            </div>
+            <div className="flex">
+              <button
+                type="button"
+                onClick={toggleChatMode}
+                className="text-sm font-medium px-4 py-2 rounded-full border border-indigo-200 bg-white/80 hover:bg-indigo-50 transition-colors duration-300"
+              >
+                {isChatMode ? "Create Task" : "Chat Mode"}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-50/60 backdrop-blur-sm border border-red-100/30 p-4 rounded-2xl animate-fade-in">
+              <div className="flex items-start">
+                <svg className="h-5 w-5 text-red-500/80 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-red-700/90">{error}</span>
               </div>
             </div>
-            
-            {error && (
-              <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg animate-fade-in">
-                <div className="flex items-start">
-                  <svg className="h-5 w-5 text-red-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span className="text-red-700">{error}</span>
-                </div>
-              </div>
-            )}
-            
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <div className="p-8">
             {isChatMode ? (
               // Chat Mode UI
               <div className="flex flex-col h-[calc(100vh-300px)]">
                 {/* Chat Messages */}
                 <div 
                   ref={chatContainerRef}
-                  className="flex-1 overflow-y-auto mb-4 space-y-4 bg-gray-50 p-4 rounded-xl"
+                  className="flex-1 overflow-y-auto mb-4 space-y-4 bg-white/30 backdrop-blur-sm p-4 rounded-2xl border border-white/30"
                 >
                   {chatMessages.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-gray-500 text-center p-6">
@@ -385,8 +339,8 @@ const TaskInput = ({ userId, setTasks }) => {
                         <div
                           className={`max-w-[80%] rounded-2xl p-4 ${
                             message.type === 'user'
-                              ? 'bg-indigo-600 text-white'
-                              : 'bg-white border border-gray-200 text-gray-800'
+                              ? 'bg-gradient-to-r from-indigo-500/80 to-purple-500/80 text-white/90'
+                              : 'bg-white/50 border border-white/30 text-gray-800'
                           }`}
                         >
                           <p className="whitespace-pre-wrap">{message.text}</p>
@@ -406,7 +360,7 @@ const TaskInput = ({ userId, setTasks }) => {
                   )}
                   {isLoadingChat && (
                     <div className="flex justify-start">
-                      <div className="bg-white border border-gray-200 rounded-2xl p-4 flex space-x-2 items-center">
+                      <div className="bg-white/50 border border-white/30 rounded-2xl p-4 flex space-x-2 items-center">
                         <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                         <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
                         <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
@@ -417,16 +371,19 @@ const TaskInput = ({ userId, setTasks }) => {
                 
                 {/* Chat Input */}
                 <form onSubmit={handleChatSubmit} className="space-y-4">
-                  <div className="relative">
+                  <div className="relative group">
                     <textarea
                       value={taskText}
                       onChange={(e) => setTaskText(e.target.value)}
                       placeholder="Type your message here..."
-                      className="w-full p-4 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow duration-200 shadow-sm hover:shadow-md resize-none"
+                      className="w-full p-4 bg-white/30 backdrop-blur-sm border border-white/30 rounded-2xl focus:ring-2 focus:ring-indigo-500/30 focus:border-transparent transition-all duration-300 shadow-sm group-hover:shadow-md resize-none"
                       rows={3}
+                      style={{
+                        boxShadow: '0 2px 20px -2px rgba(0, 0, 0, 0.03)',
+                      }}
                     />
                     {interimTranscript && (
-                      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/80 to-white/95 backdrop-blur-sm text-gray-600 italic border-t rounded-b-xl">
+                      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/40 to-white/60 backdrop-blur-sm text-gray-600 italic border-t border-white/20 rounded-b-2xl">
                         {interimTranscript}
                       </div>
                     )}
@@ -436,85 +393,9 @@ const TaskInput = ({ userId, setTasks }) => {
                     <button
                       type="submit"
                       disabled={isLoadingChat || !taskText.trim()}
-                      className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl flex items-center justify-center space-x-2 transform hover:scale-[1.02] active:scale-[0.98]"
+                      className="flex-1 bg-gradient-to-r from-indigo-500/80 to-purple-500/80 text-white/90 px-6 py-3 rounded-2xl hover:from-indigo-600/80 hover:to-purple-600/80 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center justify-center space-x-2 transform hover:scale-[1.01] active:scale-[0.99] backdrop-blur-sm"
                     >
                       {isLoadingChat ? (
-                        <>
-                          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <span>Sending...</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                          </svg>
-                          <span>Send Message</span>
-                        </>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={toggleListening}
-                      className={`p-3 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center transform hover:scale-[1.02] active:scale-[0.98] ${
-                        isListening
-                          ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white hover:from-red-600 hover:to-pink-600'
-                          : 'bg-white text-indigo-600 border-2 border-indigo-200 hover:border-indigo-300'
-                      }`}
-                      title={isListening ? 'Stop recording' : 'Start voice input'}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-6 w-6"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                </form>
-              </div>
-            ) : (
-              // Task Creation Mode UI
-              <>
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  <div className="space-y-4">
-                    <label htmlFor="taskInput" className="block text-sm font-medium text-gray-700">
-                      What would you like to accomplish?
-                    </label>
-                    <div className="relative">
-                      <textarea
-                        id="taskInput"
-                        value={taskText}
-                        onChange={(e) => setTaskText(e.target.value)}
-                        placeholder="Describe your task in natural language..."
-                        className="w-full p-4 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow duration-200 shadow-sm hover:shadow-md resize-none"
-                        rows={4}
-                      />
-                      {interimTranscript && (
-                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/80 to-white/95 backdrop-blur-sm text-gray-600 italic border-t rounded-b-xl">
-                          {interimTranscript}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-3">
-                    <button
-                      type="submit"
-                      disabled={processing}
-                      className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl flex items-center justify-center space-x-2 transform hover:scale-[1.02] active:scale-[0.98]"
-                    >
-                      {processing ? (
                         <>
                           <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -525,85 +406,174 @@ const TaskInput = ({ userId, setTasks }) => {
                       ) : (
                         <>
                           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 22l4-4h6a2 2 0 002-2V4a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2h6l4 4z"/>
                           </svg>
-                          <span>Create Task</span>
+                          <span>Send Message</span>
                         </>
                       )}
                     </button>
                     <button
                       type="button"
                       onClick={toggleListening}
-                      className={`p-3 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center transform hover:scale-[1.02] active:scale-[0.98] ${
+                      className={`p-3 rounded-2xl transition-all duration-300 shadow-sm hover:shadow-md flex items-center justify-center transform hover:scale-[1.01] active:scale-[0.99] backdrop-blur-sm ${
                         isListening
-                          ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white hover:from-red-600 hover:to-pink-600'
-                          : 'bg-white text-indigo-600 border-2 border-indigo-200 hover:border-indigo-300'
+                          ? 'bg-gradient-to-r from-red-400/80 to-pink-400/80 text-white/90 hover:from-red-500/80 hover:to-pink-500/80'
+                          : 'bg-white/30 text-indigo-600/90 border border-white/30 hover:bg-white/40'
                       }`}
                       title={isListening ? 'Stop recording' : 'Start voice input'}
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-6 w-6"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                        />
-                      </svg>
+                      {isListening ? (
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                      ) : (
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                        </svg>
+                      )}
                     </button>
                   </div>
                 </form>
-                
-                {isListening && (
-                  <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100 animate-pulse">
-                    <div className="flex items-center text-green-700">
-                      <div className="relative">
-                        <div className="absolute -inset-1 bg-green-500 rounded-full animate-ping opacity-20"></div>
-                        <div className="relative h-2 w-2 bg-green-500 rounded-full"></div>
+              </div>
+            ) : (
+              // Task Creation UI
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="space-y-4">
+                  <label htmlFor="taskInput" className="block text-sm font-medium text-gray-700/80">
+                    What would you like to accomplish?
+                  </label>
+                  <div className="relative group">
+                    <textarea
+                      id="taskInput"
+                      value={taskText}
+                      onChange={(e) => setTaskText(e.target.value)}
+                      placeholder="Describe your task in natural language..."
+                      className="w-full p-4 bg-white/30 backdrop-blur-sm border border-white/30 rounded-2xl focus:ring-2 focus:ring-indigo-500/30 focus:border-transparent transition-all duration-300 shadow-sm group-hover:shadow-md resize-none"
+                      rows={4}
+                      style={{
+                        boxShadow: '0 2px 20px -2px rgba(0, 0, 0, 0.03)',
+                      }}
+                    />
+                    {interimTranscript && (
+                      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/40 to-white/60 backdrop-blur-sm text-gray-600 italic border-t border-white/20 rounded-b-2xl">
+                        {interimTranscript}
                       </div>
-                      <span className="ml-3 text-sm font-medium">Listening... Speak now</span>
-                    </div>
+                    )}
                   </div>
-                )}
-
-                <div className="mt-8 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 border border-indigo-100">
-                  <h3 className="text-sm font-semibold text-indigo-800 mb-4 flex items-center">
-                    <svg className="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                    Tips for Better Task Creation
-                  </h3>
-                  <ul className="space-y-3 text-sm text-indigo-700">
-                    <li className="flex items-center">
-                      <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                      </svg>
-                      Include specific deadlines (e.g., "by next Friday")
-                    </li>
-                    <li className="flex items-center">
-                      <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                      </svg>
-                      Specify priority level if important
-                    </li>
-                    <li className="flex items-center">
-                      <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                      </svg>
-                      Add relevant context and details
-                    </li>
-                  </ul>
                 </div>
-              </>
+                
+                <div className="flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={processing}
+                    className="flex-1 bg-gradient-to-r from-indigo-500/80 to-purple-500/80 text-white/90 px-6 py-3 rounded-2xl hover:from-indigo-600/80 hover:to-purple-600/80 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center justify-center space-x-2 transform hover:scale-[1.01] active:scale-[0.99] backdrop-blur-sm"
+                  >
+                    {processing ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                        </svg>
+                        <span>Create Task</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleListening}
+                    className={`p-3 rounded-2xl transition-all duration-300 shadow-sm hover:shadow-md flex items-center justify-center transform hover:scale-[1.01] active:scale-[0.99] backdrop-blur-sm ${
+                      isListening
+                        ? 'bg-gradient-to-r from-red-400/80 to-pink-400/80 text-white/90 hover:from-red-500/80 hover:to-pink-500/80'
+                        : 'bg-white/30 text-indigo-600/90 border border-white/30 hover:bg-white/40'
+                    }`}
+                    title={isListening ? 'Stop recording' : 'Start voice input'}
+                  >
+                    {isListening ? (
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                      </svg>
+                    ) : (
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </form>
             )}
+
+            {isListening && (
+              <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100 animate-pulse">
+                <div className="flex items-center text-green-700">
+                  <div className="relative">
+                    <div className="absolute -inset-1 bg-green-500 rounded-full animate-ping opacity-20"></div>
+                    <div className="relative h-2 w-2 bg-green-500 rounded-full"></div>
+                  </div>
+                  <span className="ml-3 text-sm font-medium">Listening... Speak now</span>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-8 bg-gradient-to-r from-indigo-50/20 to-purple-50/20 rounded-2xl p-6 border border-indigo-100/20 backdrop-blur-sm">
+              <h3 className="text-sm font-semibold text-indigo-800/80 mb-4 flex items-center">
+                <svg className="h-5 w-5 mr-2 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                Tips for Better Task Creation
+              </h3>
+              <ul className="space-y-3 text-sm text-indigo-700/70">
+                <li className="flex items-center">
+                  <svg className="h-4 w-4 mr-2 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  Include specific deadlines (e.g., "by next Friday")
+                </li>
+                <li className="flex items-center">
+                  <svg className="h-4 w-4 mr-2 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  Specify priority level if important
+                </li>
+                <li className="flex items-center">
+                  <svg className="h-4 w-4 mr-2 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                  </svg>
+                  Add relevant context and details
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
+
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(99, 102, 241, 0.1);
+          border-radius: 100px;
+          transition: all 0.3s ease;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(99, 102, 241, 0.2);
+        }
+      `}</style>
     </>
   );
 };
@@ -617,13 +587,13 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
   const [loadingSupport, setLoadingSupport] = useState(false);
   const [editingDate, setEditingDate] = useState(false);
   const [newDueDate, setNewDueDate] = useState(
-    task.deadline ? new Date(task.deadline).toISOString().split('T')[0] : ""
+    task.deadline ? formatDateForInput(task.deadline) : ""
   );
   
   // When the task prop changes, update the due date state but preserve expanded state
   useEffect(() => {
     if (task.deadline) {
-      setNewDueDate(new Date(task.deadline).toISOString().split('T')[0]);
+      setNewDueDate(formatDateForInput(task.deadline));
     }
     if (task.emotional_support) {
       setEmotionalSupport(task.emotional_support);
@@ -673,15 +643,11 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
     if (!newDueDate) return;
     
     try {
-      // Convert date string to ISO format with time
       const dateObj = new Date(newDueDate);
-      dateObj.setHours(23, 59, 59);
-      
       await updateTask(task.id, { 
-        deadline: dateObj.toISOString() 
+        deadline: dateObj.toISOString()
       });
       setEditingDate(false);
-      // Removed refreshTasks() to prevent unnecessary reloads and state loss
     } catch (err) {
       console.error("Error updating due date:", err);
     }
@@ -721,7 +687,7 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
                 {editingDate ? (
                   <div className="flex items-center space-x-2">
                     <input
-                      type="date"
+                      type="datetime-local"
                       value={newDueDate}
                       onChange={(e) => setNewDueDate(e.target.value)}
                       className="text-sm border border-gray-300 rounded px-2 py-1"
@@ -1187,10 +1153,7 @@ const CalendarView = ({ userId }) => {
                     >
                       <div className="font-medium truncate">{task.title}</div>
                       <div className="text-xs mt-1">
-                        {new Date(task.deadline).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
+                        {formatDate(task.deadline)}
                       </div>
                     </div>
                   ))}
@@ -1247,10 +1210,7 @@ const CalendarView = ({ userId }) => {
                     >
                       <div className="font-medium">{task.title}</div>
                       <div className="text-xs mt-1">
-                        {new Date(task.deadline).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
+                        {formatDate(task.deadline)}
                       </div>
                     </div>
                   ))}
@@ -1510,15 +1470,15 @@ const Dashboard = ({ userId }) => {
   const [activeTab, setActiveTab] = useState("tasks");
   
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-50">
       <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userId={userId} />
-      
-      <div className="container mx-auto px-4 py-6">
+      <main className="container mx-auto p-6 pr-[400px]">
         {activeTab === "tasks" && <TasksList userId={userId} />}
         {activeTab === "calendar" && <CalendarView userId={userId} />}
         {activeTab === "timeline" && <TimelineView userId={userId} />}
         {activeTab === "statistics" && <Statistics userId={userId} />}
-      </div>
+      </main>
+      <TaskInput userId={userId} setTasks={setTasks} />
     </div>
   );
 };
@@ -1646,9 +1606,9 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-50">
       <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userId={userId} />
-      <main className="container mx-auto p-4">
+      <main className="container mx-auto p-6 pr-[400px]">
         {activeTab === "tasks" && <TasksList userId={userId} />}
         {activeTab === "calendar" && <CalendarView userId={userId} />}
         {activeTab === "timeline" && <TimelineView userId={userId} />}

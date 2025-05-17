@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
   Chart as ChartJS,
@@ -9,8 +9,10 @@ import {
   LinearScale,
   BarElement,
   Title,
+  PointElement,
+  LineElement,
 } from 'chart.js';
-import { Pie, Bar } from 'react-chartjs-2';
+import { Pie, Bar, Line } from 'react-chartjs-2';
 
 // Register ChartJS components
 ChartJS.register(
@@ -20,7 +22,9 @@ ChartJS.register(
   CategoryScale,
   LinearScale,
   BarElement,
-  Title
+  Title,
+  PointElement,
+  LineElement
 );
 
 const Statistics = ({ userId }) => {
@@ -28,6 +32,52 @@ const Statistics = ({ userId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [tasksWithSubtasks, setTasksWithSubtasks] = useState([]);
+  const [expandedTaskId, setExpandedTaskId] = useState(null);
+  const [timeRange, setTimeRange] = useState('week'); // 'day', 'week', 'month', 'year'
+  const [aiFeedback, setAiFeedback] = useState(null);
+  const [aiFeedbackError, setAiFeedbackError] = useState(null);
+  const chartRef = useRef(null);
+  const [chartData, setChartData] = useState(null);
+  const lastUpdateRef = useRef(null);
+
+  // Function to check if we need to update feedback
+  const shouldUpdateFeedback = (tasks) => {
+    if (!lastUpdateRef.current) return true;
+    
+    const now = new Date();
+    const timeSinceLastUpdate = now - lastUpdateRef.current;
+    
+    // Update if more than 1 hour has passed
+    if (timeSinceLastUpdate > 3600000) return true;
+    
+    // Check if any task has been updated since last feedback
+    const hasTaskUpdates = tasks.some(task => 
+      new Date(task.updated_at) > lastUpdateRef.current
+    );
+    
+    return hasTaskUpdates;
+  };
+
+  // Function to fetch AI feedback
+  const fetchAIFeedback = async () => {
+    try {
+      setAiFeedbackError(null);
+      const response = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/statistics/user/${userId}/feedback`);
+      
+      // Check if the response indicates AI service is unavailable
+      if (response.data.summary.includes('AI Analysis Service')) {
+        setAiFeedbackError(response.data.summary);
+        setAiFeedback(null);
+      } else {
+        setAiFeedback(response.data);
+        lastUpdateRef.current = new Date();
+      }
+    } catch (err) {
+      console.error('Error fetching AI feedback:', err);
+      setAiFeedbackError('Unable to generate AI feedback at this time');
+      setAiFeedback(null);
+    }
+  };
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -38,6 +88,14 @@ const Statistics = ({ userId }) => {
         // Fetch tasks with their subtasks
         const tasksResponse = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/tasks/user/${userId}`);
         setTasksWithSubtasks(tasksResponse.data);
+        if (tasksResponse.data.length > 0) {
+          setExpandedTaskId(tasksResponse.data[0].id);
+        }
+
+        // Fetch AI feedback only if needed
+        if (shouldUpdateFeedback(tasksResponse.data)) {
+          await fetchAIFeedback();
+        }
       } catch (err) {
         setError('Failed to load statistics');
         console.error('Error fetching statistics:', err);
@@ -47,280 +105,450 @@ const Statistics = ({ userId }) => {
     };
 
     fetchStats();
+
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy();
+        chartRef.current = null;
+      }
+    };
   }, [userId]);
 
-  if (loading) return <div className="p-4">Loading statistics...</div>;
-  if (error) return <div className="p-4 text-red-500">{error}</div>;
-  if (!stats) return <div className="p-4">No statistics available</div>;
+  // Update chart data when tasks or timeRange changes
+  useEffect(() => {
+    if (tasksWithSubtasks.length > 0) {
+      const newChartData = prepareCompletionTrendData();
+      setChartData(newChartData);
+    }
+  }, [tasksWithSubtasks, timeRange]);
 
-  // Prepare data for priority distribution chart
-  const priorityData = {
-    labels: ['High', 'Medium', 'Low'],
-    datasets: [
-      {
-        data: [
-          stats.tasks_by_priority.high,
-          stats.tasks_by_priority.medium,
-          stats.tasks_by_priority.low,
-        ],
-        backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
-      },
-    ],
+  // Cleanup chart on unmount
+  useEffect(() => {
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy();
+        chartRef.current = null;
+      }
+    };
+  }, []);
+
+  // Function to prepare completion trend data
+  const prepareCompletionTrendData = () => {
+    const now = new Date();
+    let startDate;
+    let labels;
+    
+    switch (timeRange) {
+      case 'day':
+        startDate = new Date(now.setHours(0, 0, 0, 0));
+        labels = Array.from({length: 24}, (_, i) => `${i}:00`);
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        break;
+      case 'month':
+        startDate = new Date(now.setMonth(now.getMonth() - 1));
+        labels = Array.from({length: 30}, (_, i) => `Day ${i + 1}`);
+        break;
+      case 'year':
+        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+        labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        break;
+      default:
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    }
+
+    // Initialize data arrays with zeros
+    const taskData = new Array(labels.length).fill(0);
+    const subtaskData = new Array(labels.length).fill(0);
+
+    // Filter and count completions
+    tasksWithSubtasks.forEach(task => {
+      if (task.completed && new Date(task.updated_at) >= startDate) {
+        const index = getIndexForDate(new Date(task.updated_at), timeRange);
+        if (index >= 0 && index < labels.length) {
+          taskData[index]++;
+        }
+      }
+
+      task.subtasks?.forEach(subtask => {
+        if (subtask.completed && new Date(subtask.updated_at) >= startDate) {
+          const index = getIndexForDate(new Date(subtask.updated_at), timeRange);
+          if (index >= 0 && index < labels.length) {
+            subtaskData[index]++;
+          }
+        }
+      });
+    });
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Tasks Completed',
+          data: taskData,
+          borderColor: '#3b82f6',
+          backgroundColor: '#3b82f6',
+          tension: 0.4,
+        },
+        {
+          label: 'Subtasks Completed',
+          data: subtaskData,
+          borderColor: '#10b981',
+          backgroundColor: '#10b981',
+          tension: 0.4,
+        },
+      ],
+    };
   };
 
-  // Prepare data for completion status chart
-  const statusData = {
-    labels: ['Completed', 'In Progress'],
-    datasets: [
-      {
-        data: [stats.tasks_by_status.completed, stats.tasks_by_status.in_progress],
-        backgroundColor: ['#10b981', '#3b82f6'],
-      },
-    ],
+  // Helper function to get index for a date based on time range
+  const getIndexForDate = (date, range) => {
+    switch (range) {
+      case 'day':
+        return date.getHours();
+      case 'week':
+        return date.getDay();
+      case 'month':
+        return date.getDate() - 1;
+      case 'year':
+        return date.getMonth();
+      default:
+        return date.getDay();
+    }
   };
 
-  // Prepare data for weekly completion chart
-  const weeklyData = {
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    datasets: [
-      {
-        label: 'Completed Tasks',
-        data: [0, 0, 0, 0, 0, 0, 0], // This would need to be calculated from recent_completions
-        backgroundColor: '#3b82f6',
-      },
-    ],
-  };
-
-  // Prepare data for subtask priority distribution chart
-  const subtaskPriorityData = {
-    labels: ['High', 'Medium', 'Low'],
-    datasets: [
-      {
-        data: [
-          stats.subtasks_by_priority.high,
-          stats.subtasks_by_priority.medium,
-          stats.subtasks_by_priority.low,
-        ],
-        backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
-      },
-    ],
-  };
-
-  // Prepare data for subtask completion status chart
-  const subtaskStatusData = {
-    labels: ['Completed', 'In Progress'],
-    datasets: [
-      {
-        data: [stats.subtasks_by_status.completed, stats.subtasks_by_status.in_progress],
-        backgroundColor: ['#10b981', '#3b82f6'],
-      },
-    ],
-  };
-
-  // Function to calculate subtask statistics for a task
+  // Function to calculate subtask statistics for a specific task
   const calculateSubtaskStats = (task) => {
     const subtasks = task.subtasks || [];
     const totalSubtasks = subtasks.length;
     const completedSubtasks = subtasks.filter(st => st.completed).length;
     const completionRate = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
     
-    // Calculate average completion time for subtasks
-    const completionTimes = subtasks
+    // Calculate completion timeline
+    const completionTimeline = subtasks
       .filter(st => st.completed && st.created_at && st.updated_at)
-      .map(st => {
-        const created = new Date(st.created_at);
-        const updated = new Date(st.updated_at);
-        return (updated - created) / (1000 * 60 * 60); // Convert to hours
-      });
-    
-    const avgCompletionTime = completionTimes.length > 0
-      ? completionTimes.reduce((a, b) => a + b, 0) / completionTimes.length
-      : null;
-
-    // Count subtasks by deadline status
-    const now = new Date();
-    const upcomingDeadlines = subtasks.filter(st => 
-      st.deadline && !st.completed && new Date(st.deadline) > now
-    ).length;
-    const overdueDeadlines = subtasks.filter(st => 
-      st.deadline && !st.completed && new Date(st.deadline) <= now
-    ).length;
+      .map(st => ({
+        date: new Date(st.updated_at),
+        description: st.description
+      }))
+      .sort((a, b) => a.date - b.date);
 
     return {
       totalSubtasks,
       completedSubtasks,
       completionRate,
-      avgCompletionTime,
-      upcomingDeadlines,
-      overdueDeadlines
+      completionTimeline
     };
   };
 
+  // Function to calculate basic task stats
+  const calculateBasicTaskStats = (task) => {
+    const subtasks = task.subtasks || [];
+    const totalSubtasks = subtasks.length;
+    const completedSubtasks = subtasks.filter(st => st.completed).length;
+    const completionRate = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
+    
+    return {
+      totalSubtasks,
+      completedSubtasks,
+      completionRate
+    };
+  };
+
+  if (loading) return <div className="p-4">Loading statistics...</div>;
+  if (error) return <div className="p-4 text-red-500">{error}</div>;
+  if (!stats) return <div className="p-4">No statistics available</div>;
+
   return (
     <div className="p-6">
-      <h2 className="text-2xl font-bold mb-6">Task Statistics</h2>
-      
-      {/* Task Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Total Tasks</h3>
-          <p className="text-3xl font-bold text-indigo-600">{stats.total_tasks}</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Completion Rate</h3>
-          <p className="text-3xl font-bold text-green-600">{stats.completion_rate.toFixed(1)}%</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Avg. Completion Time</h3>
-          <p className="text-3xl font-bold text-blue-600">
-            {stats.average_completion_time ? `${stats.average_completion_time.toFixed(1)}h` : 'N/A'}
-          </p>
-        </div>
-      </div>
-
-      {/* Task Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Tasks by Priority</h3>
-          <div className="h-64">
-            <Pie data={priorityData} options={{ maintainAspectRatio: false }} />
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Tasks by Status</h3>
-          <div className="h-64">
-            <Pie data={statusData} options={{ maintainAspectRatio: false }} />
-          </div>
-        </div>
-      </div>
-
-      {/* Subtask Statistics Section */}
-      <h2 className="text-2xl font-bold mb-6 mt-12">Subtask Statistics</h2>
-      
-      {/* Subtask Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Total Subtasks</h3>
-          <p className="text-3xl font-bold text-indigo-600">{stats.total_subtasks}</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Subtask Completion Rate</h3>
-          <p className="text-3xl font-bold text-green-600">{stats.subtask_completion_rate.toFixed(1)}%</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-700">Avg. Subtasks per Task</h3>
-          <p className="text-3xl font-bold text-blue-600">
-            {stats.average_subtasks_per_task.toFixed(1)}
-          </p>
-        </div>
-      </div>
-
-      {/* Subtask Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Subtasks by Priority</h3>
-          <div className="h-64">
-            <Pie data={subtaskPriorityData} options={{ maintainAspectRatio: false }} />
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Subtasks by Status</h3>
-          <div className="h-64">
-            <Pie data={subtaskStatusData} options={{ maintainAspectRatio: false }} />
-          </div>
-        </div>
-      </div>
-
-      {/* Subtasks by Task Section */}
-      <div className="mt-12">
-        <h2 className="text-2xl font-bold mb-6">Subtasks by Task</h2>
-        <div className="space-y-6">
-          {tasksWithSubtasks.map((task) => {
-            const subtaskStats = calculateSubtaskStats(task);
-            
-            return (
-              <div key={task.id} className="bg-white p-4 rounded-lg shadow">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-800">{task.title}</h3>
-                  <span className={`px-3 py-1 rounded-full text-sm ${
-                    task.completed ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {task.completed ? 'Completed' : 'In Progress'}
-                  </span>
+      {/* AI Feedback Section */}
+      {aiFeedback && !aiFeedbackError && (
+        <div className="mb-8 overflow-hidden">
+          <div className="bg-gradient-to-br from-blue-50/80 via-purple-50/80 to-pink-50/80 rounded-2xl shadow-sm border border-blue-100/30">
+            <div className="p-8">
+              <div className="flex items-start space-x-6">
+                <div className="flex-shrink-0">
+                  <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-purple-100 rounded-2xl flex items-center justify-center transform rotate-2">
+                    <svg className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
                 </div>
                 
-                {subtaskStats.totalSubtasks > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Completion Stats */}
-                    <div className="bg-gray-50 p-3 rounded">
-                      <h4 className="text-sm font-medium text-gray-600 mb-2">Completion</h4>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Total Subtasks:</span>
-                          <span className="font-medium">{subtaskStats.totalSubtasks}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Completed:</span>
-                          <span className="font-medium text-green-600">{subtaskStats.completedSubtasks}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Completion Rate:</span>
-                          <span className="font-medium text-blue-600">{subtaskStats.completionRate.toFixed(1)}%</span>
-                        </div>
-                      </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+                    Your Productivity Journey
+                  </h2>
+                  <p className="text-lg text-gray-700 mb-6 leading-relaxed">
+                    {aiFeedback.summary}
+                  </p>
+                  
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Key Insights */}
+                    <div className="bg-white/60 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+                      <h3 className="flex items-center text-lg font-medium text-gray-800 mb-4">
+                        <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
+                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                        </span>
+                        Key Insights
+                      </h3>
+                      <ul className="space-y-3">
+                        {aiFeedback.insights.map((insight, index) => (
+                          <li key={index} className="flex items-start group">
+                            <span className="flex-shrink-0 w-6 h-6 bg-blue-50 rounded-full flex items-center justify-center mr-3 group-hover:bg-blue-100 transition-colors">
+                              <span className="text-blue-600 text-sm font-medium">{index + 1}</span>
+                            </span>
+                            <p className="text-gray-600 leading-relaxed">{insight}</p>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
 
-                    {/* Time Stats */}
-                    <div className="bg-gray-50 p-3 rounded">
-                      <h4 className="text-sm font-medium text-gray-600 mb-2">Time Metrics</h4>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Avg. Completion Time:</span>
-                          <span className="font-medium">
-                            {subtaskStats.avgCompletionTime 
-                              ? `${subtaskStats.avgCompletionTime.toFixed(1)}h`
-                              : 'N/A'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Deadline Stats */}
-                    <div className="bg-gray-50 p-3 rounded">
-                      <h4 className="text-sm font-medium text-gray-600 mb-2">Deadlines</h4>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Upcoming:</span>
-                          <span className="font-medium text-blue-600">{subtaskStats.upcomingDeadlines}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Overdue:</span>
-                          <span className="font-medium text-red-600">{subtaskStats.overdueDeadlines}</span>
-                        </div>
-                      </div>
+                    {/* Suggestions for Growth */}
+                    <div className="bg-white/60 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+                      <h3 className="flex items-center text-lg font-medium text-gray-800 mb-4">
+                        <span className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
+                          <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                        </span>
+                        Growth Opportunities
+                      </h3>
+                      <ul className="space-y-3">
+                        {aiFeedback.suggestions.map((suggestion, index) => (
+                          <li key={index} className="flex items-start group">
+                            <span className="flex-shrink-0 w-6 h-6 bg-purple-50 rounded-full flex items-center justify-center mr-3 group-hover:bg-purple-100 transition-colors">
+                              <span className="text-purple-600 text-sm font-medium">{index + 1}</span>
+                            </span>
+                            <p className="text-gray-600 leading-relaxed">{suggestion}</p>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   </div>
-                ) : (
-                  <p className="text-gray-500 italic">No subtasks for this task</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aiFeedbackError && (
+        <div className="mb-8 bg-yellow-50 rounded-lg shadow-sm">
+          <div className="p-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-yellow-700">{aiFeedbackError}</p>
+                <button
+                  onClick={fetchAIFeedback}
+                  className="mt-2 text-sm text-yellow-700 hover:text-yellow-800 underline"
+                >
+                  Try Again
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Overall Completion Trends Section */}
+      <div className="mb-12">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-semibold text-gray-800 flex items-center">
+            <span className="w-10 h-10 bg-gradient-to-br from-blue-100 to-purple-100 rounded-xl flex items-center justify-center mr-3 transform rotate-2">
+              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+              </svg>
+            </span>
+            Your Progress Timeline
+          </h2>
+          <div className="flex space-x-2">
+            {['day', 'week', 'month', 'year'].map((range) => (
+              <button
+                key={range}
+                onClick={() => setTimeRange(range)}
+                className={`px-4 py-2 rounded-lg transition-all duration-200 ${
+                  timeRange === range
+                    ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md'
+                    : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                {range.charAt(0).toUpperCase() + range.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100/80 p-6">
+          <div className="h-96">
+            {chartData && tasksWithSubtasks.length > 0 && (
+              <Line
+                ref={chartRef}
+                data={chartData}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: {
+                    y: {
+                      beginAtZero: true,
+                      grid: {
+                        color: 'rgba(226, 232, 240, 0.5)',
+                      },
+                      ticks: {
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                        },
+                        color: '#64748b',
+                      },
+                      title: {
+                        display: true,
+                        text: 'Completed Tasks',
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                          size: 14,
+                          weight: '500',
+                        },
+                        color: '#475569',
+                      }
+                    },
+                    x: {
+                      grid: {
+                        color: 'rgba(226, 232, 240, 0.5)',
+                      },
+                      ticks: {
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                        },
+                        color: '#64748b',
+                      }
+                    }
+                  },
+                  plugins: {
+                    legend: {
+                      labels: {
+                        font: {
+                          family: 'Inter, system-ui, sans-serif',
+                          size: 13,
+                        },
+                        usePointStyle: true,
+                        padding: 20,
+                      }
+                    }
+                  }
+                }}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Task Tracking Section */}
+      <div>
+        <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+          <span className="w-10 h-10 bg-gradient-to-br from-purple-100 to-pink-100 rounded-xl flex items-center justify-center mr-3 transform -rotate-2">
+            <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+          </span>
+          Task Progress Details
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {tasksWithSubtasks.map(task => {
+            const basicStats = calculateBasicTaskStats(task);
+            const isExpanded = expandedTaskId === task.id;
+            const subtaskStats = isExpanded ? calculateSubtaskStats(task) : null;
+
+            return (
+              <div 
+                key={task.id}
+                className="bg-white rounded-xl shadow-sm border border-gray-100/80 transition-all duration-200 hover:shadow-md cursor-pointer overflow-hidden"
+                onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
+              >
+                {/* Basic Info */}
+                <div className="p-5">
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className="text-lg font-medium text-gray-800">{task.title}</h3>
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      task.priority === 'high' ? 'bg-red-100 text-red-700' :
+                      task.priority === 'medium' ? 'bg-amber-100 text-amber-700' :
+                      'bg-emerald-100 text-emerald-700'
+                    }`}>
+                      {task.priority}
+                    </span>
+                  </div>
+                  <div className="flex items-center">
+                    <div className="flex-1">
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-300"
+                          style={{ width: `${basicStats.completionRate}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span className="ml-3 text-sm font-medium text-gray-600">
+                      {basicStats.completedSubtasks}/{basicStats.totalSubtasks}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Expanded Content */}
+                {isExpanded && subtaskStats && (
+                  <div className="border-t border-gray-100">
+                    <div className="p-5 space-y-4">
+                      {/* Progress Stats */}
+                      <div className="bg-gradient-to-br from-gray-50 to-gray-50/50 rounded-xl p-4">
+                        <h4 className="text-sm font-medium text-gray-700 mb-3">Progress Overview</h4>
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Total Subtasks</span>
+                            <span className="font-medium text-gray-800">{subtaskStats.totalSubtasks}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Completed</span>
+                            <span className="font-medium text-emerald-600">{subtaskStats.completedSubtasks}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Completion Rate</span>
+                            <span className="font-medium text-blue-600">{subtaskStats.completionRate.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Recent Completions */}
+                      {subtaskStats.completionTimeline.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700 mb-3">Recent Progress</h4>
+                          <div className="space-y-2">
+                            {subtaskStats.completionTimeline.slice(0, 3).map((completion, index) => (
+                              <div key={index} className="flex items-center space-x-3 p-2 bg-gray-50/50 rounded-lg">
+                                <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-sm text-gray-600 truncate">{completion.description}</div>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {completion.date.toLocaleDateString()}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             );
           })}
-        </div>
-      </div>
-
-      {/* Recent Completions */}
-      <div className="mt-8 bg-white p-4 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Recent Completions</h3>
-        <div className="space-y-2">
-          {stats.recent_completions.map((task) => (
-            <div key={task.id} className="flex justify-between items-center p-2 hover:bg-gray-50">
-              <span className="font-medium">{task.title}</span>
-              <span className="text-sm text-gray-500">
-                Completed {new Date(task.updated_at).toLocaleDateString()}
-              </span>
-            </div>
-          ))}
         </div>
       </div>
     </div>
