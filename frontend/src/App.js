@@ -181,10 +181,13 @@ const TaskInput = ({ userId, setTasks }) => {
 
   const toggleChatMode = () => {
     setIsChatMode(!isChatMode);
+    setTaskText(""); // Clear text when switching modes
   };
   
   const handleChatSubmit = async (e) => {
     e.preventDefault();
+    
+    console.log("Submit pressed. Current taskText:", taskText, "Trimmed length:", taskText.trim().length);
     
     if (!taskText.trim()) {
       return;
@@ -374,7 +377,10 @@ const TaskInput = ({ userId, setTasks }) => {
                   <div className="relative group">
                     <textarea
                       value={taskText}
-                      onChange={(e) => setTaskText(e.target.value)}
+                      onChange={(e) => {
+                        console.log("Text changed:", e.target.value);
+                        setTaskText(e.target.value);
+                      }}
                       placeholder="Type your message here..."
                       className="w-full p-4 bg-white/30 backdrop-blur-sm border border-white/30 rounded-2xl focus:ring-2 focus:ring-indigo-500/30 focus:border-transparent transition-all duration-300 shadow-sm group-hover:shadow-md resize-none"
                       rows={3}
@@ -447,7 +453,10 @@ const TaskInput = ({ userId, setTasks }) => {
                     <textarea
                       id="taskInput"
                       value={taskText}
-                      onChange={(e) => setTaskText(e.target.value)}
+                      onChange={(e) => {
+                        console.log("Text changed:", e.target.value);
+                        setTaskText(e.target.value);
+                      }}
                       placeholder="Describe your task in natural language..."
                       className="w-full p-4 bg-white/30 backdrop-blur-sm border border-white/30 rounded-2xl focus:ring-2 focus:ring-indigo-500/30 focus:border-transparent transition-all duration-300 shadow-sm group-hover:shadow-md resize-none"
                       rows={4}
@@ -678,7 +687,7 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
               
               {/* Priority and Due Date Display */}
               <div className="flex items-center space-x-3 mt-1 mb-2">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
                   ${task.priority === 'high' ? 'bg-red-100 text-red-800' : 
                     task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
                     'bg-green-100 text-green-800'}`}>
