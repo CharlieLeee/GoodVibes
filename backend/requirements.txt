@@ -24,3 +24,5 @@ python-multipart>=0.0.9
 jq>=1.6.0
 typer>=0.9.0
 python-dateutil
+langchain>=0.1.0
+langchain_together>=0.0.5

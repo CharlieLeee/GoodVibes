@@ -194,6 +194,75 @@ const TaskInput = ({ userId, setTasks }) => {
       setProcessing(false);
     }
   };
+  
+  // Chat with LLM directly from task input
+  const [isChatMode, setIsChatMode] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
+  const chatContainerRef = useRef(null);
+  
+  useEffect(() => {
+    // Scroll to bottom of chat container when messages change
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
+  const toggleChatMode = () => {
+    setIsChatMode(!isChatMode);
+  };
+  
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!taskText.trim()) {
+      return;
+    }
+    
+    // Add user message to chat
+    const userMessage = {
+      id: Date.now(),
+      type: 'user',
+      text: taskText,
+      timestamp: new Date()
+    };
+    
+    setChatMessages(prev => [...prev, userMessage]);
+    setTaskText('');
+    setIsLoadingChat(true);
+    
+    try {
+      // Send to backend
+      const response = await axios.post(`${API}/chat`, {
+        message: userMessage.text,
+        user_id: userId
+      });
+      
+      // Add AI response to chat
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        text: response.data.response,
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, aiMessage]);
+    } catch (err) {
+      console.error("Error in chat:", err);
+      
+      // Add error message
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        text: "Sorry, I encountered an error. Please try again.",
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoadingChat(false);
+    }
+  };
 
   return (
     <>
@@ -240,13 +309,32 @@ const TaskInput = ({ userId, setTasks }) => {
       >
         <div className={`h-full overflow-y-auto transition-all duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>
           <div className="p-8">
-            <div className="flex items-center space-x-4 mb-8">
-              <div className="bg-gradient-to-r from-indigo-500 to-purple-500 p-3 rounded-xl shadow-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center space-x-4">
+                <div className="bg-gradient-to-r from-indigo-500 to-purple-500 p-3 rounded-xl shadow-lg">
+                  {isChatMode ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  )}
+                </div>
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                  {isChatMode ? "Chat Assistant" : "Create Task"}
+                </h2>
               </div>
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">Create Task</h2>
+              <div className="flex">
+                <button
+                  type="button"
+                  onClick={toggleChatMode}
+                  className="text-sm font-medium px-4 py-2 rounded-full border border-indigo-200 bg-white hover:bg-indigo-50 transition-colors duration-300"
+                >
+                  {isChatMode ? "Create Task" : "Chat Mode"}
+                </button>
+              </div>
             </div>
             
             {error && (
@@ -260,119 +348,248 @@ const TaskInput = ({ userId, setTasks }) => {
               </div>
             )}
             
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-4">
-                <label htmlFor="taskInput" className="block text-sm font-medium text-gray-700">
-                  What would you like to accomplish?
-                </label>
-                <div className="relative">
-                  <textarea
-                    id="taskInput"
-                    value={taskText}
-                    onChange={(e) => setTaskText(e.target.value)}
-                    placeholder="Describe your task in natural language..."
-                    className="w-full p-4 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow duration-200 shadow-sm hover:shadow-md resize-none"
-                    rows={4}
-                  />
-                  {interimTranscript && (
-                    <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/80 to-white/95 backdrop-blur-sm text-gray-600 italic border-t rounded-b-xl">
-                      {interimTranscript}
+            {isChatMode ? (
+              // Chat Mode UI
+              <div className="flex flex-col h-[calc(100vh-300px)]">
+                {/* Chat Messages */}
+                <div 
+                  ref={chatContainerRef}
+                  className="flex-1 overflow-y-auto mb-4 space-y-4 bg-gray-50 p-4 rounded-xl"
+                >
+                  {chatMessages.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-gray-500 text-center p-6">
+                      <div>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-4 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                        </svg>
+                        <p>Ask me anything about task management, productivity, or how I can help you!</p>
+                      </div>
+                    </div>
+                  ) : (
+                    chatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-[80%] rounded-2xl p-4 ${
+                            message.type === 'user'
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-white border border-gray-200 text-gray-800'
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap">{message.text}</p>
+                          <p
+                            className={`text-xs mt-1 ${
+                              message.type === 'user' ? 'text-indigo-200' : 'text-gray-500'
+                            }`}
+                          >
+                            {new Date(message.timestamp).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  {isLoadingChat && (
+                    <div className="flex justify-start">
+                      <div className="bg-white border border-gray-200 rounded-2xl p-4 flex space-x-2 items-center">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
                     </div>
                   )}
                 </div>
-              </div>
-              
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={processing}
-                  className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl flex items-center justify-center space-x-2 transform hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  {processing ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-                      </svg>
-                      <span>Create Task</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleListening}
-                  className={`p-3 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center transform hover:scale-[1.02] active:scale-[0.98] ${
-                    isListening
-                      ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white hover:from-red-600 hover:to-pink-600'
-                      : 'bg-white text-indigo-600 border-2 border-indigo-200 hover:border-indigo-300'
-                  }`}
-                  title={isListening ? 'Stop recording' : 'Start voice input'}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-6 w-6"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </form>
-            
-            {isListening && (
-              <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100 animate-pulse">
-                <div className="flex items-center text-green-700">
+                
+                {/* Chat Input */}
+                <form onSubmit={handleChatSubmit} className="space-y-4">
                   <div className="relative">
-                    <div className="absolute -inset-1 bg-green-500 rounded-full animate-ping opacity-20"></div>
-                    <div className="relative h-2 w-2 bg-green-500 rounded-full"></div>
+                    <textarea
+                      value={taskText}
+                      onChange={(e) => setTaskText(e.target.value)}
+                      placeholder="Type your message here..."
+                      className="w-full p-4 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow duration-200 shadow-sm hover:shadow-md resize-none"
+                      rows={3}
+                    />
+                    {interimTranscript && (
+                      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/80 to-white/95 backdrop-blur-sm text-gray-600 italic border-t rounded-b-xl">
+                        {interimTranscript}
+                      </div>
+                    )}
                   </div>
-                  <span className="ml-3 text-sm font-medium">Listening... Speak now</span>
-                </div>
+                  
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={isLoadingChat || !taskText.trim()}
+                      className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl flex items-center justify-center space-x-2 transform hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      {isLoadingChat ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          <span>Sending...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                          <span>Send Message</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleListening}
+                      className={`p-3 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center transform hover:scale-[1.02] active:scale-[0.98] ${
+                        isListening
+                          ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white hover:from-red-600 hover:to-pink-600'
+                          : 'bg-white text-indigo-600 border-2 border-indigo-200 hover:border-indigo-300'
+                      }`}
+                      title={isListening ? 'Stop recording' : 'Start voice input'}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-6 w-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </form>
               </div>
-            )}
+            ) : (
+              // Task Creation Mode UI
+              <>
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  <div className="space-y-4">
+                    <label htmlFor="taskInput" className="block text-sm font-medium text-gray-700">
+                      What would you like to accomplish?
+                    </label>
+                    <div className="relative">
+                      <textarea
+                        id="taskInput"
+                        value={taskText}
+                        onChange={(e) => setTaskText(e.target.value)}
+                        placeholder="Describe your task in natural language..."
+                        className="w-full p-4 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow duration-200 shadow-sm hover:shadow-md resize-none"
+                        rows={4}
+                      />
+                      {interimTranscript && (
+                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/80 to-white/95 backdrop-blur-sm text-gray-600 italic border-t rounded-b-xl">
+                          {interimTranscript}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={processing}
+                      className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl flex items-center justify-center space-x-2 transform hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      {processing ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                          </svg>
+                          <span>Create Task</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleListening}
+                      className={`p-3 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center transform hover:scale-[1.02] active:scale-[0.98] ${
+                        isListening
+                          ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white hover:from-red-600 hover:to-pink-600'
+                          : 'bg-white text-indigo-600 border-2 border-indigo-200 hover:border-indigo-300'
+                      }`}
+                      title={isListening ? 'Stop recording' : 'Start voice input'}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-6 w-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </form>
+                
+                {isListening && (
+                  <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100 animate-pulse">
+                    <div className="flex items-center text-green-700">
+                      <div className="relative">
+                        <div className="absolute -inset-1 bg-green-500 rounded-full animate-ping opacity-20"></div>
+                        <div className="relative h-2 w-2 bg-green-500 rounded-full"></div>
+                      </div>
+                      <span className="ml-3 text-sm font-medium">Listening... Speak now</span>
+                    </div>
+                  </div>
+                )}
 
-            <div className="mt-8 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 border border-indigo-100">
-              <h3 className="text-sm font-semibold text-indigo-800 mb-4 flex items-center">
-                <svg className="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                Tips for Better Task Creation
-              </h3>
-              <ul className="space-y-3 text-sm text-indigo-700">
-                <li className="flex items-center">
-                  <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  Include specific deadlines (e.g., "by next Friday")
-                </li>
-                <li className="flex items-center">
-                  <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  Specify priority level if important
-                </li>
-                <li className="flex items-center">
-                  <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                  </svg>
-                  Add relevant context and details
-                </li>
-              </ul>
-            </div>
+                <div className="mt-8 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 border border-indigo-100">
+                  <h3 className="text-sm font-semibold text-indigo-800 mb-4 flex items-center">
+                    <svg className="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Tips for Better Task Creation
+                  </h3>
+                  <ul className="space-y-3 text-sm text-indigo-700">
+                    <li className="flex items-center">
+                      <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      </svg>
+                      Include specific deadlines (e.g., "by next Friday")
+                    </li>
+                    <li className="flex items-center">
+                      <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      </svg>
+                      Specify priority level if important
+                    </li>
+                    <li className="flex items-center">
+                      <svg className="h-4 w-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                      </svg>
+                      Add relevant context and details
+                    </li>
+                  </ul>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

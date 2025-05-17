@@ -13,6 +13,12 @@ from typing import List, Optional, Dict, Any, Union
 import uuid
 from datetime import datetime, timedelta
 
+# LangChain imports
+from langchain_together import ChatTogether
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationChain
+from langchain.schema import SystemMessage, HumanMessage, AIMessage
+
 # Root directory and environment loading
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -121,6 +127,17 @@ class TaskStatistics(BaseModel):
     subtasks_by_status: Dict[str, int]
     average_subtasks_per_task: float
 
+
+# Add new Chat models
+class ChatMessage(BaseModel):
+    message: str
+    user_id: str
+
+class ChatResponse(BaseModel):
+    response: str
+    
+# Chat memory storage
+conversation_memories = {}
 
 # Together.ai integration functions
 async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
@@ -661,6 +678,67 @@ async def get_user_statistics(user_id: str):
         subtasks_by_status=subtasks_by_status,
         average_subtasks_per_task=average_subtasks_per_task
     )
+
+
+# Chat API endpoint
+@api_router.post("/chat", response_model=ChatResponse)
+async def chat_with_llm(chat_message: ChatMessage):
+    # Verify user exists
+    user = await db.users.find_one({"id": chat_message.user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if Together.ai API key is available
+    if not TOGETHER_API_KEY:
+        return {"response": "Chat functionality is currently unavailable. Please set up your TOGETHER_API_KEY."}
+    
+    try:
+        # Get or create conversation memory for this user
+        if chat_message.user_id not in conversation_memories:
+            conversation_memories[chat_message.user_id] = ConversationBufferMemory(return_messages=True)
+            
+        memory = conversation_memories[chat_message.user_id]
+        
+        # Initialize the LLM with TogetherAI
+        llm = ChatTogether(
+            model="mistralai/Mistral-7B-Instruct-v0.2",
+            temperature=0.7,
+            max_tokens=1024,
+            together_api_key=TOGETHER_API_KEY
+        )
+        
+        # Create system message
+        current_date = datetime.utcnow().strftime("%Y-%m-%d")
+        system_message = f"""You are an AI assistant that helps users manage their tasks and stay organized.
+        You can help break down complex tasks into manageable steps, provide encouragement, 
+        and answer questions about productivity and time management.
+        
+        Keep your responses focused, helpful, and concise. If a user mentions a task, 
+        offer to help them plan it or add it to their system.
+        
+        The current date is {current_date}."""
+        
+        # Get chat history from memory
+        chat_history = memory.chat_memory.messages if hasattr(memory, 'chat_memory') else []
+        
+        # If this is the first message, add the system message
+        if not chat_history:
+            chat_history = [SystemMessage(content=system_message)]
+        
+        # Add user message to history
+        chat_history.append(HumanMessage(content=chat_message.message))
+        
+        # Get response from the LLM
+        ai_message = llm.invoke(chat_history)
+        
+        # Add AI response to memory
+        memory.chat_memory.add_message(HumanMessage(content=chat_message.message))
+        memory.chat_memory.add_message(AIMessage(content=ai_message.content))
+        
+        return {"response": ai_message.content}
+    except Exception as e:
+        logging.error(f"Error in chat endpoint: {str(e)}")
+        return {"response": "I'm sorry, I encountered an error. Please try again later."}
 
 
 # Add your routes to the router instead of directly to app
