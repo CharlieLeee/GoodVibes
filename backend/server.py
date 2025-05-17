@@ -1080,7 +1080,7 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
         
         # Initialize the LLM with TogetherAI
         llm = ChatTogether(
-            model="deepseek-ai/DeepSeek-R1",
+            model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
             temperature=0.7,
             max_tokens=1024,
             together_api_key=TOGETHER_API_KEY
