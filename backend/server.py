@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Body, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Body, Depends, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -9,15 +9,18 @@ import requests
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Literal, Type
 import uuid
 from datetime import datetime, timedelta
 
 # LangChain imports
 from langchain_together import ChatTogether
-from langchain.memory import ConversationBufferMemory
+from langchain.memory import ConversationBufferMemory, ChatMessageHistory
 from langchain.chains import ConversationChain
 from langchain.schema import SystemMessage, HumanMessage, AIMessage
+from langchain.tools import Tool, StructuredTool
+from langchain.agents import AgentExecutor, AgentType, initialize_agent
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, HumanMessagePromptTemplate
 
 # Root directory and environment loading
 ROOT_DIR = Path(__file__).parent
@@ -137,7 +140,26 @@ class ChatResponse(BaseModel):
     response: str
     
 # Chat memory storage
-conversation_memories = {}
+chat_histories = {}
+
+# Store pending tasks
+pending_tasks = []
+
+# Background task to process pending task creations
+async def process_pending_tasks():
+    """Process any pending task creations in the background"""
+    global pending_tasks
+    
+    # Make a copy of the current pending tasks and clear the original list
+    tasks_to_process = pending_tasks.copy()
+    pending_tasks = []
+    
+    for task_data in tasks_to_process:
+        try:
+            user_id = task_data.pop("user_id")
+            await create_task_from_llm(task_data, user_id)
+        except Exception as e:
+            logging.error(f"Error processing pending task: {str(e)}")
 
 # Together.ai integration functions
 async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
@@ -680,9 +702,173 @@ async def get_user_statistics(user_id: str):
     )
 
 
+# Create a task creation tool for the LLM
+class TaskCreationInput(BaseModel):
+    title: str = Field(..., description="The title of the task")
+    description: Optional[str] = Field(None, description="A detailed description of the task")
+    priority: str = Field("medium", description="The priority of the task (low, medium, high)")
+    deadline: Optional[str] = Field(None, description="The deadline for the task in ISO format (YYYY-MM-DD)")
+
+async def create_task_from_llm(task_data: dict, user_id: str):
+    """
+    Create a task in the database using data provided by the LLM.
+    
+    Args:
+        task_data: A dictionary containing task information
+        user_id: The ID of the user who owns the task
+    
+    Returns:
+        A confirmation message with the created task details
+    """
+    try:
+        # Validate user exists
+        user = await db.users.find_one({"id": user_id})
+        if not user:
+            return {"error": "User not found"}
+        
+        # Process deadline if provided
+        deadline = None
+        if task_data.get("deadline"):
+            try:
+                deadline_str = task_data["deadline"]
+                if 'T' in deadline_str:
+                    deadline = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+                else:
+                    # For YYYY-MM-DD format, add time (end of day)
+                    deadline = datetime.fromisoformat(f"{deadline_str}T23:59:59")
+            except:
+                logging.error(f"Failed to parse deadline: {task_data['deadline']}")
+        
+        # Create task
+        task = Task(
+            user_id=user_id,
+            title=task_data["title"],
+            description=task_data.get("description"),
+            deadline=deadline,
+            priority=task_data.get("priority", "medium"),
+        )
+        
+        # Generate emotional support
+        task.emotional_support = await generate_emotional_support(task.title, task.deadline)
+        
+        # Insert task
+        task_dict = task.dict()
+        await db.tasks.insert_one(task_dict)
+        
+        # Create response with task details
+        response = {
+            "success": True,
+            "message": f"Task '{task.title}' created successfully",
+            "task_id": task.id,
+            "title": task.title,
+            "priority": task.priority,
+            "deadline": formatDate(task.deadline) if task.deadline else "No deadline"
+        }
+        
+        return response
+    except Exception as e:
+        logging.error(f"Error creating task from LLM: {str(e)}")
+        return {"error": f"Failed to create task: {str(e)}"}
+
+def formatDate(date_obj):
+    """Format a date object to a readable string"""
+    if not date_obj:
+        return ""
+    return date_obj.strftime("%B %d, %Y")
+
+# Define the input schema for task creation
+class TaskCreationInput(BaseModel):
+    title: str = Field(..., description="The title of the task")
+    description: Optional[str] = Field(None, description="A detailed description of the task")
+    priority: Optional[str] = Field("medium", description="The priority level: low, medium, or high")
+    deadline: Optional[str] = Field(None, description="The deadline in YYYY-MM-DD format")
+
+# Create tool for chat endpoint
+def get_create_task_tool(user_id: str):
+    """Create a structured tool for task creation"""
+    
+    # Simple synchronous function that handles the string parsing
+    def create_task_sync(query: str) -> str:
+        """Synchronous wrapper for task creation"""
+        try:
+            # Parse the query string (synchronous version)
+            parts = query.split("|")
+            title = parts[0].strip()
+            description = parts[1].strip() if len(parts) > 1 else None
+            priority = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "medium"
+            deadline = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+            
+            # Validate priority
+            if priority not in ["low", "medium", "high"]:
+                priority = "medium"
+                
+            # Create a placeholder response until the async function completes
+            # This approach avoids issues with event loops in FastAPI
+            task_data = {
+                "title": title,
+                "description": description,
+                "priority": priority,
+                "deadline": deadline,
+                "user_id": user_id
+            }
+            
+            # Add to the global pending tasks list
+            global pending_tasks
+            pending_tasks.append(task_data)
+            
+            return f"Task '{title}' will be created with {priority} priority" + (f" and deadline {deadline}" if deadline else ".") + " The task is being processed."
+        except Exception as e:
+            logging.error(f"Error in synchronous task creation: {str(e)}")
+            return f"Error creating task: {str(e)}"
+
+    # Return a regular Tool with a synchronous function
+    return Tool(
+        name="create_task",
+        func=create_task_sync,
+        description="""Create a task for the user. The format should be: 
+        create_task: <title> | <description> | <priority> | <deadline>
+        
+        Examples:
+        create_task: Buy groceries | Get milk, eggs and bread | high | 2025-05-20
+        create_task: Call doctor | Schedule annual checkup | medium | 2025-05-25
+        create_task: Finish report | | low | 
+        
+        Only <title> is required. Other fields are optional and can be left empty."""
+    )
+    
+async def _handle_create_task(query: str, user_id: str) -> str:
+    """Handle a create task request with a query string"""
+    try:
+        # Parse the query string
+        parts = query.split("|")
+        title = parts[0].strip()
+        description = parts[1].strip() if len(parts) > 1 else None
+        priority = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "medium"
+        deadline = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+        
+        # Validate priority
+        if priority not in ["low", "medium", "high"]:
+            priority = "medium"
+        
+        # Create task data
+        task_data = {
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "deadline": deadline
+        }
+        
+        result = await create_task_from_llm(task_data, user_id)
+        if "error" in result:
+            return f"Error: {result['error']}"
+        return f"✅ {result['message']}. Task '{result['title']}' has been created with {result['priority']} priority" + (f" and deadline {result['deadline']}" if result['deadline'] != "No deadline" else ".")
+    except Exception as e:
+        logging.error(f"Error handling task creation: {str(e)}")
+        return f"Error creating task: {str(e)}"
+
 # Chat API endpoint
 @api_router.post("/chat", response_model=ChatResponse)
-async def chat_with_llm(chat_message: ChatMessage):
+async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundTasks):
     # Verify user exists
     user = await db.users.find_one({"id": chat_message.user_id})
     if not user:
@@ -693,11 +879,16 @@ async def chat_with_llm(chat_message: ChatMessage):
         return {"response": "Chat functionality is currently unavailable. Please set up your TOGETHER_API_KEY."}
     
     try:
-        # Get or create conversation memory for this user
-        if chat_message.user_id not in conversation_memories:
-            conversation_memories[chat_message.user_id] = ConversationBufferMemory(return_messages=True)
-            
-        memory = conversation_memories[chat_message.user_id]
+        # Get or create chat history for this user
+        if chat_message.user_id not in chat_histories:
+            chat_histories[chat_message.user_id] = ChatMessageHistory()
+        
+        # Create conversation memory with the chat history
+        memory = ConversationBufferMemory(
+            chat_memory=chat_histories[chat_message.user_id],
+            memory_key="chat_history",
+            return_messages=True
+        )
         
         # Initialize the LLM with TogetherAI
         llm = ChatTogether(
@@ -707,35 +898,54 @@ async def chat_with_llm(chat_message: ChatMessage):
             together_api_key=TOGETHER_API_KEY
         )
         
-        # Create system message
+        # Create the task creation tool
+        create_task_tool = get_create_task_tool(chat_message.user_id)
+        tools = [create_task_tool]
+        
+        # Create system message to guide the agent
         current_date = datetime.utcnow().strftime("%Y-%m-%d")
-        system_message = f"""You are an AI assistant that helps users manage their tasks and stay organized.
-        You can help break down complex tasks into manageable steps, provide encouragement, 
-        and answer questions about productivity and time management.
+        system_message = (
+            "You are an AI assistant that helps users manage their tasks and stay organized. "
+            "You can help break down complex tasks into manageable steps, provide encouragement, "
+            "and answer questions about productivity and time management.\n\n"
+            "IMPORTANT: You have the ability to create tasks directly using the create_task tool.\n\n"
+            "When to use the create_task tool:\n"
+            "1. When the user explicitly asks to create or add a task\n"
+            "2. When the user describes a task they need to complete\n"
+            "3. When the user mentions a deadline or something they need to remember to do\n\n"
+            f"The current date is {current_date}. Be helpful, clear, and concise."
+        )
         
-        Keep your responses focused, helpful, and concise. If a user mentions a task, 
-        offer to help them plan it or add it to their system.
+        # Use the initialize_agent approach with a simpler agent type
+        agent_chain = initialize_agent(
+            tools,
+            llm,
+            agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+            verbose=True,
+            memory=memory,
+            handle_parsing_errors=True,
+            max_iterations=3,
+            agent_kwargs={"system_message": system_message}
+        )
         
-        The current date is {current_date}."""
+        # Add the user message to chat history
+        chat_histories[chat_message.user_id].add_user_message(chat_message.message)
         
-        # Get chat history from memory
-        chat_history = memory.chat_memory.messages if hasattr(memory, 'chat_memory') else []
+        # Get response from the agent
+        try:
+            response = await agent_chain.ainvoke({"input": chat_message.message})
+            ai_response = response.get("output", "I'm sorry, I couldn't process your request.")
+        except Exception as agent_error:
+            logging.error(f"Agent error: {str(agent_error)}")
+            ai_response = "I encountered an error while processing your request. Please try again with a simpler question or task."
         
-        # If this is the first message, add the system message
-        if not chat_history:
-            chat_history = [SystemMessage(content=system_message)]
+        # Add the AI response to chat history
+        chat_histories[chat_message.user_id].add_ai_message(ai_response)
         
-        # Add user message to history
-        chat_history.append(HumanMessage(content=chat_message.message))
+        # Schedule background task to process any pending tasks
+        background_tasks.add_task(process_pending_tasks)
         
-        # Get response from the LLM
-        ai_message = llm.invoke(chat_history)
-        
-        # Add AI response to memory
-        memory.chat_memory.add_message(HumanMessage(content=chat_message.message))
-        memory.chat_memory.add_message(AIMessage(content=ai_message.content))
-        
-        return {"response": ai_message.content}
+        return {"response": ai_response}
     except Exception as e:
         logging.error(f"Error in chat endpoint: {str(e)}")
         return {"response": "I'm sorry, I encountered an error. Please try again later."}

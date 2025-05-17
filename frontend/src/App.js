@@ -247,6 +247,17 @@ const TaskInput = ({ userId, setTasks }) => {
       };
       
       setChatMessages(prev => [...prev, aiMessage]);
+      
+      // Check if a task was created and refresh tasks if needed
+      if (response.data.response.includes("Task") && response.data.response.includes("created successfully")) {
+        // Refresh tasks in the parent component
+        try {
+          const tasksResponse = await axios.get(`${API}/tasks/user/${userId}`);
+          setTasks(tasksResponse.data);
+        } catch (refreshError) {
+          console.error("Error refreshing tasks:", refreshError);
+        }
+      }
     } catch (err) {
       console.error("Error in chat:", err);
       
