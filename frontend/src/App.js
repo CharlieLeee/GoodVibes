@@ -599,7 +599,7 @@ const TasksList = ({ userId }) => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState("all"); // all, active, completed
+  const [filter, setFilter] = useState("active"); // all, active, completed
 
   useEffect(() => {
     fetchTasks();
