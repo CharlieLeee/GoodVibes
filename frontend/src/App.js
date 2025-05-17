@@ -68,7 +68,7 @@ const Navigation = ({ activeTab, setActiveTab, userId }) => {
 };
 
 // Task Input component
-const TaskInput = ({ userId, setTasks }) => {
+const TaskInput = ({ userId, setTasks, fetchTasks }) => {
   const [taskText, setTaskText] = useState("");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
@@ -158,9 +158,15 @@ const TaskInput = ({ userId, setTasks }) => {
       setTasks(prevTasks => [response.data, ...prevTasks]);
       setTaskText("");
       setInterimTranscript('');
+      // Automatically refresh tasks after creating a new task
+      fetchTasks();
     } catch (err) {
       console.error("Error processing task:", err);
       setError("Failed to process task. Please try again.");
+      // Check if the error is due to the AI model not working
+      if (err.response && err.response.status === 503) {
+        setError("The AI model is currently unavailable. The 'Create Task' function is not available at this time.");
+      }
     } finally {
       setProcessing(false);
     }
@@ -1288,7 +1294,29 @@ const TimelineView = ({ userId }) => {
 // Main Dashboard component
 const Dashboard = ({ userId }) => {
   const [activeTab, setActiveTab] = useState("tasks");
-  
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("active"); // all, active, completed
+
+  const fetchTasks = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/tasks/user/${userId}`);
+      setTasks(response.data);
+      setError("");
+    } catch (err) {
+      console.error("Error fetching tasks:", err);
+      setError("Failed to load tasks. Please refresh the page.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTasks();
+  }, [userId]);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userId={userId} />
@@ -1298,7 +1326,7 @@ const Dashboard = ({ userId }) => {
         {activeTab === "timeline" && <TimelineView userId={userId} />}
         {activeTab === "statistics" && <Statistics userId={userId} />}
       </main>
-      <TaskInput userId={userId} setTasks={setTasks} />
+      <TaskInput userId={userId} setTasks={setTasks} fetchTasks={fetchTasks} />
     </div>
   );
 };
@@ -1310,6 +1338,17 @@ function App() {
   const [userError, setUserError] = useState("");
   const [activeTab, setActiveTab] = useState("tasks");
   const [tasks, setTasks] = useState([]);
+
+  const fetchTasks = async () => {
+    if (userId) {
+      try {
+        const response = await axios.get(`${API}/tasks/user/${userId}`);
+        setTasks(response.data);
+      } catch (err) {
+        console.error("Error fetching tasks:", err);
+      }
+    }
+  };
 
   useEffect(() => {
     const setupDefaultUser = async () => {
@@ -1362,17 +1401,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (userId) {
-      const fetchTasks = async () => {
-        try {
-          const response = await axios.get(`${API}/tasks/user/${userId}`);
-          setTasks(response.data);
-        } catch (err) {
-          console.error("Error fetching tasks:", err);
-        }
-      };
-      fetchTasks();
-    }
+    fetchTasks();
   }, [userId]);
 
   if (loadingUser) {
@@ -1434,7 +1463,7 @@ function App() {
         {activeTab === "timeline" && <TimelineView userId={userId} />}
         {activeTab === "statistics" && <Statistics userId={userId} />}
       </main>
-      <TaskInput userId={userId} setTasks={setTasks} />
+      <TaskInput userId={userId} setTasks={setTasks} fetchTasks={fetchTasks} />
     </div>
   );
 }
