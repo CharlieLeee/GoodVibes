@@ -114,6 +114,12 @@ class TaskStatistics(BaseModel):
     tasks_by_status: Dict[str, int]
     recent_completions: List[Task]
     average_completion_time: Optional[float]  # in hours
+    total_subtasks: int
+    completed_subtasks: int
+    subtask_completion_rate: float
+    subtasks_by_priority: Dict[str, int]
+    subtasks_by_status: Dict[str, int]
+    average_subtasks_per_task: float
 
 
 # Together.ai integration functions
@@ -614,6 +620,31 @@ async def get_user_statistics(user_id: str):
             completion_times.append(completion_time)
     
     average_completion_time = sum(completion_times) / len(completion_times) if completion_times else None
+
+    # Calculate subtask statistics
+    all_subtasks = []
+    for task in tasks:
+        all_subtasks.extend(task.subtasks)
+    
+    total_subtasks = len(all_subtasks)
+    completed_subtasks = sum(1 for subtask in all_subtasks if subtask.completed)
+    subtask_completion_rate = (completed_subtasks / total_subtasks * 100) if total_subtasks > 0 else 0
+    
+    # Subtasks by priority (using parent task's priority)
+    subtasks_by_priority = {
+        "high": sum(len([st for st in task.subtasks if task.priority == "high"]) for task in tasks),
+        "medium": sum(len([st for st in task.subtasks if task.priority == "medium"]) for task in tasks),
+        "low": sum(len([st for st in task.subtasks if task.priority == "low"]) for task in tasks)
+    }
+    
+    # Subtasks by status
+    subtasks_by_status = {
+        "completed": completed_subtasks,
+        "in_progress": total_subtasks - completed_subtasks
+    }
+    
+    # Average subtasks per task
+    average_subtasks_per_task = total_subtasks / total_tasks if total_tasks > 0 else 0
     
     return TaskStatistics(
         total_tasks=total_tasks,
@@ -622,7 +653,13 @@ async def get_user_statistics(user_id: str):
         tasks_by_priority=tasks_by_priority,
         tasks_by_status=tasks_by_status,
         recent_completions=recent_completions,
-        average_completion_time=average_completion_time
+        average_completion_time=average_completion_time,
+        total_subtasks=total_subtasks,
+        completed_subtasks=completed_subtasks,
+        subtask_completion_rate=subtask_completion_rate,
+        subtasks_by_priority=subtasks_by_priority,
+        subtasks_by_status=subtasks_by_status,
+        average_subtasks_per_task=average_subtasks_per_task
     )
 
 
