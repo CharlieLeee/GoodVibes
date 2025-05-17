@@ -8,6 +8,44 @@ import Statistics from './components/Statistics';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Simple Markdown renderer function
+const renderMarkdown = (text) => {
+  if (!text) return "";
+  
+  // Convert headers
+  text = text.replace(/^### (.*$)/gm, '<h3>$1</h3>');
+  text = text.replace(/^## (.*$)/gm, '<h2>$1</h2>');
+  text = text.replace(/^# (.*$)/gm, '<h1>$1</h1>');
+  
+  // Convert bold
+  text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Convert italic
+  text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Convert inline code
+  text = text.replace(/`(.*?)`/g, '<code>$1</code>');
+  
+  // Convert code blocks
+  text = text.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  
+  // Convert unordered lists
+  text = text.replace(/^\s*[\-\*]\s+(.*$)/gm, '<li>$1</li>');
+  text = text.replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>');
+  
+  // Convert ordered lists
+  text = text.replace(/^\s*\d+\.\s+(.*$)/gm, '<li>$1</li>');
+  text = text.replace(/(<li>.*<\/li>)/g, '<ol>$1</ol>');
+  
+  // Convert links
+  text = text.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  
+  // Convert line breaks
+  text = text.replace(/\n/g, '<br />');
+  
+  return text;
+};
+
 // Helper function to format dates
 const formatDate = (dateString) => {
   if (!dateString) return "";
@@ -373,7 +411,10 @@ const TaskInput = ({ userId, setTasks }) => {
                         : 'bg-white/90 shadow-sm border border-indigo-100/20 text-gray-700'
                     }`}
                   >
-                    <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                    <p 
+                      className="text-sm whitespace-pre-wrap markdown-content"
+                      dangerouslySetInnerHTML={{ __html: message.type === 'user' ? message.text : renderMarkdown(message.text) }}
+                    ></p>
                     <div className="text-right mt-1">
                       <span className={`text-xs ${message.type === 'user' ? 'text-white/70' : 'text-gray-500'}`}>
                         {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}

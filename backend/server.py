@@ -1121,7 +1121,16 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
             "This tool will analyze the task, create a main task, and add appropriate subtasks automatically.\n\n"
             f"The current date is {current_date}. Be helpful, clear, and concise. "
             "When a user describes something they need to do, consider whether it's a simple task "
-            "or a complex project that needs to be broken down into steps."
+            "or a complex project that needs to be broken down into steps.\n\n"
+            "FORMATTING: Format your responses using Markdown:\n"
+            "- Use **bold** for emphasis\n"
+            "- Use *italic* for subtle emphasis\n"
+            "- Use # for headings (# Main Heading, ## Sub Heading)\n"
+            "- Use - or * for bullet points\n"
+            "- Use 1. 2. 3. for numbered lists\n"
+            "- Use `code` for technical terms\n"
+            "- Use ```code blocks``` for multiple lines of code or examples\n"
+            "- Use [link text](URL) for links\n\n"
             "When you provide an answer to the user, make sure it is clear and concise. Do not generate very long responses."
         )
         
