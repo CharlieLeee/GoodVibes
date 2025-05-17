@@ -36,4 +36,4 @@ RUN apk add --no-cache python3 py3-pip \
 ENV PYTHONUNBUFFERED=1
 
 # Start both services: Uvicorn and Nginx
-CMD ["/entrypoint.sh"]
+CMD ["/entrypoint.sh"] 
