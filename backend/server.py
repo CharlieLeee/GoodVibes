@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Body, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Body, Depends, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -9,10 +9,19 @@ import requests
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Literal, Type
 import uuid
 from datetime import datetime, timedelta
 import time
+
+# LangChain imports
+from langchain_together import ChatTogether
+from langchain.memory import ConversationBufferMemory, ChatMessageHistory
+from langchain.chains import ConversationChain
+from langchain.schema import SystemMessage, HumanMessage, AIMessage
+from langchain.tools import Tool, StructuredTool
+from langchain.agents import AgentExecutor, AgentType, initialize_agent
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, HumanMessagePromptTemplate
 
 # Root directory and environment loading
 ROOT_DIR = Path(__file__).parent
@@ -59,12 +68,19 @@ class User(BaseModel):
 class Subtask(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str
-    title: str
+    title: Optional[str] = None
     description: str
     completed: bool = False
     deadline: Optional[datetime] = None
     order: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    def __init__(self, **data):
+        # If title is not provided or is None, use description as title
+        if "title" not in data or data["title"] is None:
+            if "description" in data:
+                data["title"] = data["description"]
+        super().__init__(**data)
 
 
 class Task(BaseModel):
@@ -143,6 +159,231 @@ class AIFeedback(BaseModel):
     insights: List[str]
     suggestions: List[str]
 
+
+# Add new Chat models
+class ChatMessage(BaseModel):
+    message: str
+    user_id: str
+
+class ChatResponse(BaseModel):
+    response: str
+
+# Chat memory storage
+chat_histories = {}
+
+# Store pending tasks
+pending_tasks = []
+pending_analyzed_tasks = []
+
+# Task creation models
+class TaskCreationInput(BaseModel):
+    title: str = Field(..., description="The title of the task")
+    description: Optional[str] = Field(None, description="A detailed description of the task")
+    priority: str = Field("medium", description="The priority of the task (low, medium, high)")
+    deadline: Optional[str] = Field(None, description="The deadline for the task in ISO format (YYYY-MM-DD)")
+
+# Background task to process pending task creations
+async def process_pending_tasks():
+    """Process any pending task creations in the background"""
+    global pending_tasks, pending_analyzed_tasks
+    
+    # Process regular tasks
+    tasks_to_process = pending_tasks.copy()
+    pending_tasks = []
+    
+    for task_data in tasks_to_process:
+        try:
+            user_id = task_data.pop("user_id")
+            await create_task_from_llm(task_data, user_id)
+        except Exception as e:
+            logging.error(f"Error processing pending task: {str(e)}")
+    
+    # Process analyzed tasks
+    analyzed_tasks = pending_analyzed_tasks.copy()
+    pending_analyzed_tasks = []
+    
+    for analyzed_task in analyzed_tasks:
+        try:
+            user_id = analyzed_task.pop("user_id")
+            text = analyzed_task.pop("text")
+            await process_natural_language_task_internal(text, user_id)
+        except Exception as e:
+            logging.error(f"Error processing analyzed task: {str(e)}")
+
+# Process a natural language task internally
+async def process_natural_language_task_internal(text: str, user_id: str) -> Dict[str, Any]:
+    """Process a natural language task input and create a task with subtasks"""
+    try:
+        # Verify user exists
+        user = await db.users.find_one({"id": user_id})
+        if not user:
+            return {"error": "User not found"}
+        
+        # Process task with Together.ai
+        task_analysis = await analyze_task_with_llm(text)
+        
+        # Create deadline if provided
+        deadline = None
+        if task_analysis.get("deadline") and task_analysis["deadline"] != "not specified" and task_analysis["deadline"] != "null":
+            try:
+                # Try to parse the date - handle both full ISO and date-only formats
+                date_str = task_analysis["deadline"]
+                if 'T' in date_str:
+                    deadline = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                else:
+                    # For YYYY-MM-DD format, add time (end of day)
+                    deadline = datetime.fromisoformat(f"{date_str}T23:59:59")
+            except:
+                # If deadline parsing fails, log the error
+                logging.error(f"Failed to parse deadline: {task_analysis['deadline']}")
+        
+        # Create task
+        task = Task(
+            user_id=user_id,
+            title=task_analysis.get("title", text),
+            description=text,
+            deadline=deadline,
+            priority=task_analysis.get("priority", "medium"),
+            emotional_support=task_analysis.get("emotional_support", "")
+        )
+        
+        # Create subtasks
+        subtasks_data = task_analysis.get("subtasks", [])
+        for i, subtask_item in enumerate(subtasks_data):
+            # Handle both new format (object with description & deadline) and old format (string only)
+            if isinstance(subtask_item, dict):
+                subtask_desc = subtask_item.get("description", "")
+                
+                # Process subtask deadline if provided
+                subtask_deadline = None
+                if subtask_item.get("deadline"):
+                    try:
+                        subtask_date_str = subtask_item["deadline"]
+                        if 'T' in subtask_date_str:
+                            subtask_deadline = datetime.fromisoformat(subtask_date_str.replace("Z", "+00:00"))
+                        else:
+                            # For YYYY-MM-DD format, add time (end of day)
+                            subtask_deadline = datetime.fromisoformat(f"{subtask_date_str}T23:59:59")
+                    except:
+                        # If parsing fails, don't set a deadline
+                        logging.error(f"Failed to parse subtask deadline: {subtask_item['deadline']}")
+            else:
+                # Handle legacy format (plain string)
+                subtask_desc = str(subtask_item)
+                subtask_deadline = None
+                
+            subtask = Subtask(
+                task_id=task.id,
+                description=subtask_desc,
+                deadline=subtask_deadline,
+                order=i
+            )
+            task.subtasks.append(subtask)
+        
+        # Insert task
+        task_dict = task.dict()
+        await db.tasks.insert_one(task_dict)
+        
+        # Return success response with task details
+        return {
+            "success": True,
+            "task_id": task.id,
+            "title": task.title,
+            "subtasks_count": len(task.subtasks),
+            "deadline": formatDate(task.deadline) if task.deadline else "No deadline",
+            "priority": task.priority
+        }
+    except Exception as e:
+        logging.error(f"Error in process_natural_language_task_internal: {str(e)}")
+        return {"error": f"Failed to process task: {str(e)}"}
+
+# Function to get all available tools for the agent
+def get_agent_tools(user_id: str):
+    """Get all tools available to the agent"""
+    
+    # Create task tool
+    def create_task_sync(query: str) -> str:
+        """Synchronous wrapper for task creation"""
+        try:
+            # Parse the query string (synchronous version)
+            parts = query.split("|")
+            title = parts[0].strip()
+            description = parts[1].strip() if len(parts) > 1 else None
+            priority = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "medium"
+            deadline = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+            
+            # Validate priority
+            if priority not in ["low", "medium", "high"]:
+                priority = "medium"
+                
+            # Create a placeholder response until the async function completes
+            task_data = {
+                "title": title,
+                "description": description,
+                "priority": priority,
+                "deadline": deadline,
+                "user_id": user_id
+            }
+            
+            # Add to the global pending tasks list
+            global pending_tasks
+            pending_tasks.append(task_data)
+            
+            return f"Task '{title}' will be created with {priority} priority" + (f" and deadline {deadline}" if deadline else ".") + " The task is being processed."
+        except Exception as e:
+            logging.error(f"Error in synchronous task creation: {str(e)}")
+            return f"Error creating task: {str(e)}"
+    
+    # Create decompose task tool
+    def decompose_task_sync(task_text: str) -> str:
+        """Decompose a task into subtasks using AI"""
+        try:
+            # Add to the pending analyzed tasks list
+            global pending_analyzed_tasks
+            pending_analyzed_tasks.append({
+                "text": task_text,
+                "user_id": user_id
+            })
+            
+            return f"Your task '{task_text}' will be analyzed and broken down into subtasks. The AI will identify the main task title, suggested subtasks, appropriate deadline, and priority level. This process is happening in the background."
+        except Exception as e:
+            logging.error(f"Error in task decomposition: {str(e)}")
+            return f"Error decomposing task: {str(e)}"
+    
+    # Return both tools
+    return [
+        Tool(
+            name="create_task",
+            func=create_task_sync,
+            description="""Create a task for the user. The format should be: 
+            create_task: <title> | <description> | <priority> | <deadline>
+            
+            Examples:
+            create_task: Buy groceries | Get milk, eggs and bread | high | 2025-05-20
+            create_task: Call doctor | Schedule annual checkup | medium | 2025-05-25
+            create_task: Finish report | | low | 
+            
+            Only <title> is required. Other fields are optional and can be left empty."""
+        ),
+        Tool(
+            name="decompose_task",
+            func=decompose_task_sync,
+            description="""Analyze and break down a complex task into manageable subtasks. 
+            This tool will analyze the task description and automatically:
+            1. Identify a clear task title
+            2. Break it down into 3-5 logical subtasks
+            3. Suggest appropriate deadlines for the task and subtasks
+            4. Recommend a priority level
+            
+            Use this when a user describes a complex project or goal that would benefit from being broken down into smaller steps.
+            
+            Example inputs:
+            - "I need to plan my wedding for next summer"
+            - "I have to write a research paper on climate change by the end of the month"
+            - "Need to renovate my kitchen in the next two months"
+            """
+        )
+    ]
 
 # Together.ai integration functions
 async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
@@ -575,7 +816,8 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
             subtask_desc = str(subtask_item)
             subtask_deadline = None
             
-        subtask_title = subtask_item.get('title') or subtask_desc
+        # Set title based on item type - using .get only when it's a dictionary
+        subtask_title = subtask_item.get('title') if isinstance(subtask_item, dict) else subtask_desc
         subtask = Subtask(
             task_id=task.id,
             title=subtask_title,
@@ -690,6 +932,243 @@ async def get_user_statistics(user_id: str):
         average_subtasks_per_task=average_subtasks_per_task
     )
 
+
+# Create a task creation tool for the LLM
+
+async def create_task_from_llm(task_data: dict, user_id: str):
+    """
+    Create a task in the database using data provided by the LLM.
+    
+    Args:
+        task_data: A dictionary containing task information
+        user_id: The ID of the user who owns the task
+    
+    Returns:
+        A confirmation message with the created task details
+    """
+    try:
+        # Validate user exists
+        user = await db.users.find_one({"id": user_id})
+        if not user:
+            return {"error": "User not found"}
+        
+        # Process deadline if provided
+        deadline = None
+        if task_data.get("deadline"):
+            try:
+                deadline_str = task_data["deadline"]
+                if 'T' in deadline_str:
+                    deadline = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+                else:
+                    # For YYYY-MM-DD format, add time (end of day)
+                    deadline = datetime.fromisoformat(f"{deadline_str}T23:59:59")
+            except:
+                logging.error(f"Failed to parse deadline: {task_data['deadline']}")
+        
+        # Create task
+        task = Task(
+            user_id=user_id,
+            title=task_data["title"],
+            description=task_data.get("description"),
+            deadline=deadline,
+            priority=task_data.get("priority", "medium"),
+        )
+        
+        # Generate emotional support
+        task.emotional_support = await generate_emotional_support(task.title, task.deadline)
+        
+        # Insert task
+        task_dict = task.dict()
+        await db.tasks.insert_one(task_dict)
+        
+        # Create response with task details
+        response = {
+            "success": True,
+            "message": f"Task '{task.title}' created successfully",
+            "task_id": task.id,
+            "title": task.title,
+            "priority": task.priority,
+            "deadline": formatDate(task.deadline) if task.deadline else "No deadline"
+        }
+        
+        return response
+    except Exception as e:
+        logging.error(f"Error creating task from LLM: {str(e)}")
+        return {"error": f"Failed to create task: {str(e)}"}
+
+def formatDate(date_obj):
+    """Format a date object to a readable string"""
+    if not date_obj:
+        return ""
+    return date_obj.strftime("%B %d, %Y")
+
+# Create tool for chat endpoint
+def get_create_task_tool(user_id: str):
+    """Create a structured tool for task creation"""
+    
+    # Simple synchronous function that handles the string parsing
+    def create_task_sync(query: str) -> str:
+        """Synchronous wrapper for task creation"""
+        try:
+            # Parse the query string (synchronous version)
+            parts = query.split("|")
+            title = parts[0].strip()
+            description = parts[1].strip() if len(parts) > 1 else None
+            priority = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "medium"
+            deadline = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+            
+            # Validate priority
+            if priority not in ["low", "medium", "high"]:
+                priority = "medium"
+                
+            # Create a placeholder response until the async function completes
+            # This approach avoids issues with event loops in FastAPI
+            task_data = {
+                "title": title,
+                "description": description,
+                "priority": priority,
+                "deadline": deadline,
+                "user_id": user_id
+            }
+            
+            # Add to the global pending tasks list
+            global pending_tasks
+            pending_tasks.append(task_data)
+            
+            return f"Task '{title}' will be created with {priority} priority" + (f" and deadline {deadline}" if deadline else ".") + " The task is being processed."
+        except Exception as e:
+            logging.error(f"Error in synchronous task creation: {str(e)}")
+            return f"Error creating task: {str(e)}"
+
+    # Return a regular Tool with a synchronous function
+    return Tool(
+        name="create_task",
+        func=create_task_sync,
+        description="""Create a task for the user. The format should be: 
+        create_task: <title> | <description> | <priority> | <deadline>
+        
+        Examples:
+        create_task: Buy groceries | Get milk, eggs and bread | high | 2025-05-20
+        create_task: Call doctor | Schedule annual checkup | medium | 2025-05-25
+        create_task: Finish report | | low | 
+        
+        Only <title> is required. Other fields are optional and can be left empty."""
+    )
+    
+async def _handle_create_task(query: str, user_id: str) -> str:
+    """Handle a create task request with a query string"""
+    try:
+        # Parse the query string
+        parts = query.split("|")
+        title = parts[0].strip()
+        description = parts[1].strip() if len(parts) > 1 else None
+        priority = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "medium"
+        deadline = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+        
+        # Validate priority
+        if priority not in ["low", "medium", "high"]:
+            priority = "medium"
+        
+        # Create task data
+        task_data = {
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "deadline": deadline
+        }
+        
+        result = await create_task_from_llm(task_data, user_id)
+        if "error" in result:
+            return f"Error: {result['error']}"
+        return f"✅ {result['message']}. Task '{result['title']}' has been created with {result['priority']} priority" + (f" and deadline {result['deadline']}" if result['deadline'] != "No deadline" else ".")
+    except Exception as e:
+        logging.error(f"Error handling task creation: {str(e)}")
+        return f"Error creating task: {str(e)}"
+
+# Chat API endpoint
+@api_router.post("/chat", response_model=ChatResponse)
+async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundTasks):
+    # Verify user exists
+    user = await db.users.find_one({"id": chat_message.user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if Together.ai API key is available
+    if not TOGETHER_API_KEY:
+        return {"response": "Chat functionality is currently unavailable. Please set up your TOGETHER_API_KEY."}
+    
+    try:
+        # Get or create chat history for this user
+        if chat_message.user_id not in chat_histories:
+            chat_histories[chat_message.user_id] = ChatMessageHistory()
+        
+        # Create conversation memory with the chat history
+        memory = ConversationBufferMemory(
+            chat_memory=chat_histories[chat_message.user_id],
+            memory_key="chat_history",
+            return_messages=True
+        )
+        
+        # Initialize the LLM with TogetherAI
+        llm = ChatTogether(
+            model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
+            temperature=0.7,
+            max_tokens=1024,
+            together_api_key=TOGETHER_API_KEY
+        )
+        
+        # Get all tools for the agent
+        tools = get_agent_tools(chat_message.user_id)
+        
+        # Create system message to guide the agent
+        current_date = datetime.utcnow().strftime("%Y-%m-%d")
+        system_message = (
+            "You are an AI assistant that helps users manage their tasks and stay organized. "
+            "You can help break down complex tasks into manageable steps, provide encouragement, "
+            "and answer questions about productivity and time management.\n\n"
+            "IMPORTANT: You have two powerful tools available:\n\n"
+            "1. create_task: Use this to create a simple task with title, description, priority, and deadline.\n"
+            "2. decompose_task: Use this for complex tasks that should be broken down into subtasks. "
+            "This tool will analyze the task, create a main task, and add appropriate subtasks automatically.\n\n"
+            f"The current date is {current_date}. Be helpful, clear, and concise. "
+            "When a user describes something they need to do, consider whether it's a simple task "
+            "or a complex project that needs to be broken down into steps."
+            "When you provide an answer to the user, make sure it is clear and concise. Do not generate very long responses."
+        )
+        
+        # Use the initialize_agent approach with a simpler agent type
+        agent_chain = initialize_agent(
+            tools,
+            llm,
+            agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+            verbose=True,
+            memory=memory,
+            handle_parsing_errors=True,
+            max_iterations=3,
+            agent_kwargs={"system_message": system_message}
+        )
+        
+        # Add the user message to chat history
+        chat_histories[chat_message.user_id].add_user_message(chat_message.message)
+        
+        # Get response from the agent
+        try:
+            response = await agent_chain.ainvoke({"input": chat_message.message})
+            ai_response = response.get("output", "I'm sorry, I couldn't process your request.")
+        except Exception as agent_error:
+            logging.error(f"Agent error: {str(agent_error)}")
+            ai_response = "I encountered an error while processing your request. Please try again with a simpler question or task."
+        
+        # Add the AI response to chat history
+        chat_histories[chat_message.user_id].add_ai_message(ai_response)
+        
+        # Schedule background task to process any pending tasks
+        background_tasks.add_task(process_pending_tasks)
+        
+        return {"response": ai_response}
+    except Exception as e:
+        logging.error(f"Error in chat endpoint: {str(e)}")
+        return {"response": "I'm sorry, I encountered an error. Please try again later."}
 
 async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) -> Dict[str, Any]:
     """Use Together.ai to analyze task statistics and provide feedback"""
@@ -913,11 +1392,21 @@ async def root():
 
 # Include the router in the main app
 app.include_router(api_router)
+# Add CORS middleware BEFORE including the router
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Include the router in the main app
+app.include_router(api_router)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
