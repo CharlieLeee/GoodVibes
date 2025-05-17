@@ -25,7 +25,7 @@ db = client[os.environ["DB_NAME"]]
 
 # Together.ai API key
 TOGETHER_API_KEY = os.environ.get("TOGETHER_API_KEY")
-TOGETHER_API_URL = "https://api.together.xyz/v1/chat/completions"
+TOGETHER_API_URL = "https://api.together.xyz/v1/completions"
 
 # Create the main app without a prefix
 app = FastAPI(title="AI Task Assistant API")
@@ -140,60 +140,56 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     current_date = datetime.utcnow()
     current_date_str = current_date.strftime("%Y-%m-%d")
 
+    prompt = f"""
+    You are an AI assistant that helps break down tasks into manageable subtasks and provides emotional support.
+    
+    CURRENT DATE: {current_date_str}
+    
+    USER INPUT: {text}
+    
+    Please analyze this task and provide:
+    1. A clear task title
+    2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
+    3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DD format)
+    4. A priority level (low, medium, high)
+    5. A brief encouraging message to help the user stay motivated
+    
+    Important instructions about dates:
+    - Today's date is {current_date_str}
+    - If a specific date is mentioned (like "June 15th"), use that as the final deadline
+    - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date
+    - If a relative time is mentioned (like "in 3 days"), calculate the date based on today
+    - For subtask deadlines, distribute them evenly between {current_date_str} and the final deadline
+    - Always return dates in ISO format (YYYY-MM-DD)
+    - If no deadline is mentioned, set deadline to null
+    
+    Format your response as a JSON object with these keys: 
+    "title", "subtasks" (array of objects with "description" and "deadline"), "deadline", "priority", "emotional_support"
+    
+    Example format:
+    {{
+        "title": "Write quarterly report",
+        "subtasks": [
+            {{ "description": "Gather sales data", "deadline": "2025-04-01" }},
+            {{ "description": "Analyze market trends", "deadline": "2025-04-05" }},
+            {{ "description": "Create charts and graphs", "deadline": "2025-04-10" }},
+            {{ "description": "Write executive summary", "deadline": "2025-04-12" }},
+            {{ "description": "Proofread and finalize", "deadline": "2025-04-14" }}
+        ],
+        "deadline": "2025-04-15",
+        "priority": "high",
+        "emotional_support": "You've got this! Breaking down this report makes it much more manageable."
+    }}
+    
+    Respond with ONLY the JSON, no explanations or other text.
+    """
+
     headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
 
     data = {
-        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are an AI assistant that helps break down tasks into manageable subtasks and provides emotional support."
-            },
-            {
-                "role": "user",
-                "content": f"""
-                CURRENT DATE: {current_date_str}
-                
-                USER INPUT: {text}
-                
-                Please analyze this task and provide:
-                1. A clear task title
-                2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
-                3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DD format)
-                4. A priority level (low, medium, high)
-                5. A brief encouraging message to help the user stay motivated
-                
-                Important instructions about dates:
-                - Today's date is {current_date_str}
-                - If a specific date is mentioned (like "June 15th"), use that as the final deadline
-                - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date
-                - If a relative time is mentioned (like "in 3 days"), calculate the date based on today
-                - For subtask deadlines, distribute them evenly between {current_date_str} and the final deadline
-                - Always return dates in ISO format (YYYY-MM-DD)
-                - If no deadline is mentioned, set deadline to null
-                
-                Format your response as a JSON object with these keys: 
-                "title", "subtasks" (array of objects with "description" and "deadline"), "deadline", "priority", "emotional_support"
-                
-                Example format:
-                {{
-                    "title": "Write quarterly report",
-                    "subtasks": [
-                        {{ "description": "Gather sales data", "deadline": "2025-04-01" }},
-                        {{ "description": "Analyze market trends", "deadline": "2025-04-05" }},
-                        {{ "description": "Create charts and graphs", "deadline": "2025-04-10" }},
-                        {{ "description": "Write executive summary", "deadline": "2025-04-12" }},
-                        {{ "description": "Proofread and finalize", "deadline": "2025-04-14" }}
-                    ],
-                    "deadline": "2025-04-15",
-                    "priority": "high",
-                    "emotional_support": "You've got this! Breaking down this report makes it much more manageable."
-                }}
-                
-                Respond with ONLY the JSON, no explanations or other text.
-                """
-            }
-        ],
+        "model": "deepseek-ai/DeepSeek-R1",
+        "prompt": prompt,
+        "max_tokens": 1024,
         "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 40,
@@ -205,7 +201,7 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
         result = response.json()
 
         # Extract the generated text from the response
-        generated_text = result["choices"][0]["message"]["content"].strip()
+        generated_text = result["choices"][0]["text"].strip()
 
         # Parse the JSON from the generated text
         try:
@@ -259,31 +255,27 @@ async def generate_emotional_support(task_title: str, deadline: Optional[datetim
         else:
             deadline_context = f"This task is due in {days_until} days."
 
+    prompt = f"""
+    You are an AI assistant that provides encouraging, motivational messages to help users with their tasks.
+    
+    Task: {task_title}
+    {deadline_context}
+    
+    Generate a brief, supportive message (1-2 sentences) that:
+    - Acknowledges the task difficulty
+    - Provides encouragement
+    - Offers a positive perspective
+    
+    Your message should be warm, supportive and empathetic.
+    Respond with ONLY the supportive message, no explanations or other text.
+    """
+
     headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
 
     data = {
-        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are an AI assistant that provides encouraging, motivational messages to help users with their tasks."
-            },
-            {
-                "role": "user",
-                "content": f"""
-                Task: {task_title}
-                {deadline_context}
-                
-                Generate a brief, supportive message (1-2 sentences) that:
-                - Acknowledges the task difficulty
-                - Provides encouragement
-                - Offers a positive perspective
-                
-                Your message should be warm, supportive and empathetic.
-                Respond with ONLY the supportive message, no explanations or other text.
-                """
-            }
-        ],
+        "model": "anthropic/claude-2",
+        "prompt": prompt,
+        "max_tokens": 100,
         "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 40,
@@ -295,7 +287,7 @@ async def generate_emotional_support(task_title: str, deadline: Optional[datetim
         result = response.json()
 
         # Extract the generated text
-        support_message = result["choices"][0]["message"]["content"].strip()
+        support_message = result["choices"][0]["text"].strip()
         return support_message
 
     except Exception as e:
