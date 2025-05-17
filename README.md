@@ -1,4 +1,20 @@
-# GoodVibes - Local Development Setup
+# ✨ GoodVibes - AI-Powered Task Management ✨
+
+GoodVibes is an intelligent task management application that combines the power of AI with beautiful, intuitive design to transform how you stay organized and productive. Say goodbye to overwhelming to-do lists and hello to a smarter way to manage your life! 🚀
+
+## 🌟 Amazing Features
+
+- 🧠 **AI-Powered Task Analysis** - Simply describe your task in plain English, and our smart AI instantly breaks it down into manageable subtasks with perfectly timed deadlines and priorities
+- 💬 **Interactive Chat Assistant** - Get personalized help, create tasks, or receive productivity advice through our friendly AI chat interface with beautiful Markdown support
+- 🎯 **Smart Prioritization** - Never wonder what to work on next! Our AI automatically suggests priority levels based on task content, deadlines, and your personal patterns
+- 💪 **Motivational Support** - Stay energized with encouraging messages tailored specifically to your tasks and deadlines
+- 📊 **Multiple Dynamic Views** - Visualize your work your way with Tasks, Calendar, Timeline, and Statistics views that adapt to your workflow
+- 🎤 **Voice Commands** - Hands full? No problem! Speak your tasks and messages for effortless productivity on the go
+- 🧩 **Intelligent Task Breakdown** - Complex projects become simple with automated subtask creation that ensures nothing falls through the cracks
+
+GoodVibes doesn't just track your tasks—it becomes your productivity partner! Through intelligent breakdown, personalized encouragement, and adaptive insights, GoodVibes helps you complete tasks faster while reducing stress and increasing satisfaction. ✅ It's not just task management—it's your personal productivity revolution! 🌈
+
+# 🛠️ GoodVibes - Local Development Setup
 
 This guide provides instructions for setting up and running the GoodVibes application locally for development purposes.
 
