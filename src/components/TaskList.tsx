@@ -3,25 +3,35 @@
 import React from 'react';
 import TaskItem from './TaskItem';
 
-// Define a type for individual tasks
+// Define the structure for a subtask
 export interface Subtask {
-  id: string;
-  name: string;
-  completed: boolean;
-  dueDate?: string; // Optional due date
+  id: string; // Local unique ID
+  googleId?: string; // Google's unique ID for this subtask, if it's a full task in Google
+  taskListId?: string; // Google's Task List ID, if it's a Google Task
+  etag?: string; // Google's ETag, if it's a Google Task
+  title: string; // Changed from 'name' to align with parent Task and Google Tasks
+  completed: boolean; // Maps to Google Task 'status'
+  dueDate?: string;
+  // rawGoogleTask?: any; // Optional: Store the original Google Task object if subtasks are full tasks
 }
 
+// Define the structure for a task, now more aligned with Google Tasks
 export interface Task {
-  id: string;
+  id: string; // Local unique ID (can be same as googleId if fetched)
+  googleId?: string; // Google's unique ID for this task
+  taskListId?: string; // Google's Task List ID
+  etag?: string; // Google's ETag for optimistic concurrency control
   title: string;
-  description: string;
-  priority: 'High Priority' | 'Medium Priority' | 'Low Priority';
-  status: string;
-  tags: string[];
-  dueDate?: string; // Optional due date for tasks without subtasks
-  createdDate: string;
-  progress: number; // e.g., 50 for 50%
-  subtasks: Subtask[];
+  description?: string; // Corresponds to Google Task 'notes'
+  priority?: "High" | "Medium" | "Low" | string; // User-defined priority.
+  status: "needsAction" | "completed"; // Aligns with Google Task 'status'
+  progress?: number; // Calculated locally
+  createdDate?: string; // Google 'created' or 'updated' timestamp
+  dueDate?: string; // Corresponds to Google Task 'due' (an RFC3339 timestamp)
+  tags?: string[]; // Local concept, could be stored in notes or via extended properties if available
+  subtasks: Subtask[]; // Subtasks associated with this task
+  link?: string; // Google Task 'selfLink' or other relevant link
+  // rawGoogleTask?: any; // Optional: Store the original Google Task object for more details
 }
 
 // Sample Data (replace with actual data fetching later)
@@ -31,15 +41,15 @@ const initialTasksSample: Task[] = [
     title: 'Create presentation for client meeting',
     description: 'Prepare slides for the quarterly review with AMC Corp.',
     priority: 'High Priority',
-    status: 'In Progress',
+    status: "needsAction", // Corrected status
     tags: ['work', 'presentation'],
     dueDate: 'Due in 3 days',
     createdDate: 'Created 2 days ago',
     progress: 50,
     subtasks: [
-      { id: 's1-1', name: 'Research content', completed: true },
-      { id: 's1-2', name: 'Design slides', completed: false },
-      { id: 's1-3', name: 'Practice presentation', completed: false },
+      { id: 's1-1', title: 'Research content', completed: true },
+      { id: 's1-2', title: 'Design slides', completed: false },
+      { id: 's1-3', title: 'Practice presentation', completed: false },
     ],
   },
   {
@@ -47,15 +57,15 @@ const initialTasksSample: Task[] = [
     title: 'Weekly grocery shopping',
     description: 'Get items for the week and meal prep ingredients',
     priority: 'Medium Priority',
-    status: 'Pending',
+    status: "needsAction", // Corrected status
     tags: ['personal', 'shopping'],
     dueDate: 'Due in 1 day',
     createdDate: 'Created 1 day ago',
     progress: 33,
     subtasks: [
-      { id: 's2-1', name: 'Make shopping list', completed: true },
-      { id: 's2-2', name: 'Check pantry inventory', completed: false },
-      { id: 's2-3', name: "Visit farmer's market", completed: false },
+      { id: 's2-1', title: 'Make shopping list', completed: true },
+      { id: 's2-2', title: 'Check pantry inventory', completed: false },
+      { id: 's2-3', title: "Visit farmer's market", completed: false },
     ],
   },
   {
@@ -63,21 +73,21 @@ const initialTasksSample: Task[] = [
     title: 'Update personal portfolio website',
     description: 'Add new projects and refresh the design.',
     priority: 'Low Priority',
-    status: 'Pending',
+    status: "needsAction", // Corrected status
     tags: ['personal', 'development'],
     dueDate: 'Due in 7 days',
     createdDate: 'Created 5 days ago',
     progress: 0,
     subtasks: [
-      { id: 's3-1', name: 'Gather project details', completed: false },
-      { id: 's3-2', name: 'Design new sections', completed: false },
-      { id: 's3-3', name: 'Develop new components', completed: false },
-      { id: 's3-4', name: 'Deploy changes', completed: false },
+      { id: 's3-1', title: 'Gather project details', completed: false },
+      { id: 's3-2', title: 'Design new sections', completed: false },
+      { id: 's3-3', title: 'Develop new components', completed: false },
+      { id: 's3-4', title: 'Deploy changes', completed: false },
     ],
   },
 ];
 
-interface TaskListProps {
+export interface TaskListProps {
   tasks: Task[];
   toggleSubtaskCompletion: (taskId: string, subtaskId: string) => void;
   toggleTaskCompletion: (taskId: string) => void;

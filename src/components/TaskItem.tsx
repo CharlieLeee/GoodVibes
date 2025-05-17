@@ -59,7 +59,7 @@ const TaskItem: React.FC<TaskItemProps> = ({
           {(!task.subtasks || task.subtasks.length === 0) && (
             <input
               type="checkbox"
-              checked={task.status === 'Completed'}
+              checked={task.status === 'completed'} // Corrected casing: 'completed'
               onChange={() => toggleTaskCompletion(task.id)}
               className="mr-3 mt-1 h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 self-start"
             />

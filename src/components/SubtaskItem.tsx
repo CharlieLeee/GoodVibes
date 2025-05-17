@@ -20,7 +20,7 @@ const SubtaskItem: React.FC<SubtaskItemProps> = ({ subtask, onToggle }) => {
         htmlFor={`subtask-${subtask.id}`}
         className={`ml-2 text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}
       >
-        {subtask.name}
+        {subtask.title}
       </label>
     </div>
   );
