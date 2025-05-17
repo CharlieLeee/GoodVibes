@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Union
 import uuid
 from datetime import datetime, timedelta
+import time
 
 # Root directory and environment loading
 ROOT_DIR = Path(__file__).parent
@@ -24,7 +25,7 @@ db = client[os.environ["DB_NAME"]]
 
 # Together.ai API key
 TOGETHER_API_KEY = os.environ.get("TOGETHER_API_KEY")
-TOGETHER_API_URL = "https://api.together.xyz/v1/completions"
+TOGETHER_API_URL = "https://api.together.xyz/v1/chat/completions"
 
 # Create the main app without a prefix
 app = FastAPI(title="AI Task Assistant API")
@@ -35,6 +36,9 @@ api_router = APIRouter(prefix="/api")
 # Security setup for simple auth
 security = HTTPBearer()
 
+# Add after other global variables
+FEEDBACK_CACHE = {}  # Store feedback with timestamps
+CACHE_DURATION = 3600  # Cache duration in seconds (1 hour)
 
 # Define Models
 class User(BaseModel):
@@ -122,6 +126,12 @@ class TaskStatistics(BaseModel):
     average_subtasks_per_task: float
 
 
+class AIFeedback(BaseModel):
+    summary: str
+    insights: List[str]
+    suggestions: List[str]
+
+
 # Together.ai integration functions
 async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     """Use Together.ai to analyze a natural language task input and break it down"""
@@ -130,56 +140,60 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     current_date = datetime.utcnow()
     current_date_str = current_date.strftime("%Y-%m-%d")
 
-    prompt = f"""
-    You are an AI assistant that helps break down tasks into manageable subtasks and provides emotional support.
-    
-    CURRENT DATE: {current_date_str}
-    
-    USER INPUT: {text}
-    
-    Please analyze this task and provide:
-    1. A clear task title
-    2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
-    3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DD format)
-    4. A priority level (low, medium, high)
-    5. A brief encouraging message to help the user stay motivated
-    
-    Important instructions about dates:
-    - Today's date is {current_date_str}
-    - If a specific date is mentioned (like "June 15th"), use that as the final deadline
-    - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date
-    - If a relative time is mentioned (like "in 3 days"), calculate the date based on today
-    - For subtask deadlines, distribute them evenly between {current_date_str} and the final deadline
-    - Always return dates in ISO format (YYYY-MM-DD)
-    - If no deadline is mentioned, set deadline to null
-    
-    Format your response as a JSON object with these keys: 
-    "title", "subtasks" (array of objects with "description" and "deadline"), "deadline", "priority", "emotional_support"
-    
-    Example format:
-    {{
-        "title": "Write quarterly report",
-        "subtasks": [
-            {{ "description": "Gather sales data", "deadline": "2025-04-01" }},
-            {{ "description": "Analyze market trends", "deadline": "2025-04-05" }},
-            {{ "description": "Create charts and graphs", "deadline": "2025-04-10" }},
-            {{ "description": "Write executive summary", "deadline": "2025-04-12" }},
-            {{ "description": "Proofread and finalize", "deadline": "2025-04-14" }}
-        ],
-        "deadline": "2025-04-15",
-        "priority": "high",
-        "emotional_support": "You've got this! Breaking down this report makes it much more manageable."
-    }}
-    
-    Respond with ONLY the JSON, no explanations or other text.
-    """
-
     headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
 
     data = {
-        "model": "deepseek-ai/DeepSeek-R1",
-        "prompt": prompt,
-        "max_tokens": 1024,
+        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are an AI assistant that helps break down tasks into manageable subtasks and provides emotional support."
+            },
+            {
+                "role": "user",
+                "content": f"""
+                CURRENT DATE: {current_date_str}
+                
+                USER INPUT: {text}
+                
+                Please analyze this task and provide:
+                1. A clear task title
+                2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
+                3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DD format)
+                4. A priority level (low, medium, high)
+                5. A brief encouraging message to help the user stay motivated
+                
+                Important instructions about dates:
+                - Today's date is {current_date_str}
+                - If a specific date is mentioned (like "June 15th"), use that as the final deadline
+                - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date
+                - If a relative time is mentioned (like "in 3 days"), calculate the date based on today
+                - For subtask deadlines, distribute them evenly between {current_date_str} and the final deadline
+                - Always return dates in ISO format (YYYY-MM-DD)
+                - If no deadline is mentioned, set deadline to null
+                
+                Format your response as a JSON object with these keys: 
+                "title", "subtasks" (array of objects with "description" and "deadline"), "deadline", "priority", "emotional_support"
+                
+                Example format:
+                {{
+                    "title": "Write quarterly report",
+                    "subtasks": [
+                        {{ "description": "Gather sales data", "deadline": "2025-04-01" }},
+                        {{ "description": "Analyze market trends", "deadline": "2025-04-05" }},
+                        {{ "description": "Create charts and graphs", "deadline": "2025-04-10" }},
+                        {{ "description": "Write executive summary", "deadline": "2025-04-12" }},
+                        {{ "description": "Proofread and finalize", "deadline": "2025-04-14" }}
+                    ],
+                    "deadline": "2025-04-15",
+                    "priority": "high",
+                    "emotional_support": "You've got this! Breaking down this report makes it much more manageable."
+                }}
+                
+                Respond with ONLY the JSON, no explanations or other text.
+                """
+            }
+        ],
         "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 40,
@@ -191,7 +205,7 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
         result = response.json()
 
         # Extract the generated text from the response
-        generated_text = result["choices"][0]["text"].strip()
+        generated_text = result["choices"][0]["message"]["content"].strip()
 
         # Parse the JSON from the generated text
         try:
@@ -245,27 +259,31 @@ async def generate_emotional_support(task_title: str, deadline: Optional[datetim
         else:
             deadline_context = f"This task is due in {days_until} days."
 
-    prompt = f"""
-    You are an AI assistant that provides encouraging, motivational messages to help users with their tasks.
-    
-    Task: {task_title}
-    {deadline_context}
-    
-    Generate a brief, supportive message (1-2 sentences) that:
-    - Acknowledges the task difficulty
-    - Provides encouragement
-    - Offers a positive perspective
-    
-    Your message should be warm, supportive and empathetic.
-    Respond with ONLY the supportive message, no explanations or other text.
-    """
-
     headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
 
     data = {
-        "model": "anthropic/claude-2",
-        "prompt": prompt,
-        "max_tokens": 100,
+        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are an AI assistant that provides encouraging, motivational messages to help users with their tasks."
+            },
+            {
+                "role": "user",
+                "content": f"""
+                Task: {task_title}
+                {deadline_context}
+                
+                Generate a brief, supportive message (1-2 sentences) that:
+                - Acknowledges the task difficulty
+                - Provides encouragement
+                - Offers a positive perspective
+                
+                Your message should be warm, supportive and empathetic.
+                Respond with ONLY the supportive message, no explanations or other text.
+                """
+            }
+        ],
         "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 40,
@@ -277,7 +295,7 @@ async def generate_emotional_support(task_title: str, deadline: Optional[datetim
         result = response.json()
 
         # Extract the generated text
-        support_message = result["choices"][0]["text"].strip()
+        support_message = result["choices"][0]["message"]["content"].strip()
         return support_message
 
     except Exception as e:
@@ -661,6 +679,220 @@ async def get_user_statistics(user_id: str):
         subtasks_by_status=subtasks_by_status,
         average_subtasks_per_task=average_subtasks_per_task
     )
+
+
+async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) -> Dict[str, Any]:
+    """Use Together.ai to analyze task statistics and provide feedback"""
+    
+    # Check if we have cached feedback that's still valid
+    cache_key = f"{stats.total_tasks}_{stats.completed_tasks}_{stats.total_subtasks}_{stats.completed_subtasks}"
+    if cache_key in FEEDBACK_CACHE:
+        cached_feedback, timestamp = FEEDBACK_CACHE[cache_key]
+        if time.time() - timestamp < CACHE_DURATION:
+            return cached_feedback
+
+    # If no Together.ai API key, return service unavailable feedback
+    if not TOGETHER_API_KEY:
+        logging.error("Together.ai API key is not configured")
+        service_unavailable_feedback = {
+            "summary": "AI Analysis Service Unavailable",
+            "insights": [
+                "The AI analysis service is currently not configured",
+                "Please check your API key configuration",
+                "Contact your administrator for assistance"
+            ],
+            "suggestions": [
+                "Configure the Together.ai API key to enable AI analysis",
+                "Check the backend logs for more information",
+                "Try refreshing the page once the service is configured"
+            ]
+        }
+        FEEDBACK_CACHE[cache_key] = (service_unavailable_feedback, time.time())
+        return service_unavailable_feedback
+
+    # Prepare task data for analysis
+    task_data = {
+        "total_tasks": stats.total_tasks,
+        "completed_tasks": stats.completed_tasks,
+        "completion_rate": stats.completion_rate,
+        "tasks_by_priority": stats.tasks_by_priority,
+        "tasks_by_status": stats.tasks_by_status,
+        "total_subtasks": stats.total_subtasks,
+        "completed_subtasks": stats.completed_subtasks,
+        "subtask_completion_rate": stats.subtask_completion_rate,
+        "recent_completions": [
+            {
+                "title": task.title,
+                "completed_at": task.updated_at.isoformat() if task.completed else None,
+                "priority": task.priority
+            }
+            for task in stats.recent_completions
+        ]
+    }
+
+    headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
+
+    data = {
+        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are an AI productivity coach analyzing a user's task completion statistics."
+            },
+            {
+                "role": "user",
+                "content": f"""
+                Here are the user's statistics:
+                {json.dumps(task_data, indent=2)}
+                
+                Please analyze these statistics and provide feedback in the following format:
+                {{
+                    "summary": "A brief 1-2 sentence summary of their overall progress",
+                    "insights": [
+                        "First insight about their productivity patterns",
+                        "Second insight about their task completion habits",
+                        "Third insight about their work patterns"
+                    ],
+                    "suggestions": [
+                        "First actionable suggestion for improvement",
+                        "Second actionable suggestion for improvement",
+                        "Third actionable suggestion for improvement"
+                    ]
+                }}
+                
+                Important guidelines:
+                - Keep the summary concise and encouraging
+                - Make insights specific to their actual statistics
+                - Make suggestions practical and actionable
+                - Focus on positive patterns and constructive improvements
+                - Use the exact format shown above
+                - Respond with ONLY the JSON, no explanations or other text
+                """
+            }
+        ],
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 40,
+    }
+
+    try:
+        logging.info("Sending request to Together.ai API")
+        response = requests.post(TOGETHER_API_URL, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        result = response.json()
+
+        # Extract the generated text from the response
+        generated_text = result["choices"][0]["message"]["content"].strip()
+        logging.info("Received response from Together.ai API")
+
+        # Parse the JSON from the generated text
+        try:
+            feedback_data = json.loads(generated_text)
+            # Cache the successful response
+            FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
+            return feedback_data
+        except json.JSONDecodeError:
+            # If the model didn't return valid JSON, try to extract JSON portion
+            try:
+                # Look for JSON-like content between curly braces
+                json_start = generated_text.find("{")
+                json_end = generated_text.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    json_str = generated_text[json_start:json_end]
+                    feedback_data = json.loads(json_str)
+                    # Cache the successful response
+                    FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
+                    return feedback_data
+            except:
+                logging.error(f"Failed to parse AI response as JSON: {generated_text}")
+                service_error_feedback = {
+                    "summary": "AI Analysis Service Error",
+                    "insights": [
+                        "The AI service returned an invalid response",
+                        "Please try again later",
+                        "Contact support if the issue persists"
+                    ],
+                    "suggestions": [
+                        "Try refreshing the page",
+                        "Check your internet connection",
+                        "Contact support if the issue persists"
+                    ]
+                }
+                FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
+                return service_error_feedback
+
+    except requests.exceptions.Timeout:
+        logging.error("Together.ai API request timed out")
+        service_error_feedback = {
+            "summary": "AI Analysis Service Timeout",
+            "insights": [
+                "The AI service took too long to respond",
+                "The request timed out after 10 seconds",
+                "Please try again later"
+            ],
+            "suggestions": [
+                "Check your internet connection",
+                "Try again in a few minutes",
+                "Contact support if the issue persists"
+            ]
+        }
+        FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
+        return service_error_feedback
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Together.ai API request failed: {str(e)}")
+        service_error_feedback = {
+            "summary": "AI Analysis Service Error",
+            "insights": [
+                "The AI service encountered an error",
+                f"Error details: {str(e)}",
+                "Please try again later"
+            ],
+            "suggestions": [
+                "Check your internet connection",
+                "Verify the AI service is running",
+                "Contact support if the issue persists"
+            ]
+        }
+        FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
+        return service_error_feedback
+
+
+@api_router.get("/statistics/user/{user_id}/feedback", response_model=AIFeedback)
+async def get_user_statistics_feedback(user_id: str):
+    """Get AI-generated feedback based on user's task statistics"""
+    try:
+        # Verify user exists
+        user = await db.users.find_one({"id": user_id})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Get user's statistics
+        stats = await get_user_statistics(user_id)
+        
+        # Get user's tasks for additional context
+        tasks = await get_user_tasks(user_id)
+        
+        # Generate AI feedback
+        feedback = await analyze_statistics_with_llm(stats, tasks)
+        
+        return feedback
+    except Exception as e:
+        logging.error(f"Error generating feedback: {str(e)}", exc_info=True)
+        # Return error feedback
+        return {
+            "summary": "Error Generating AI Analysis",
+            "insights": [
+                "An unexpected error occurred",
+                f"Error details: {str(e)}",
+                "Please try again later"
+            ],
+            "suggestions": [
+                "Check the backend logs for more information",
+                "Try refreshing the page",
+                "Contact support if the issue persists"
+            ]
+        }
 
 
 # Add your routes to the router instead of directly to app
