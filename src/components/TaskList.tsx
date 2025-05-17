@@ -9,9 +9,14 @@ export interface Subtask {
   googleId?: string; // Google's unique ID for this subtask, if it's a full task in Google
   taskListId?: string; // Google's Task List ID, if it's a Google Task
   etag?: string; // Google's ETag, if it's a Google Task
-  title: string; // Changed from 'name' to align with parent Task and Google Tasks
+  title: string; // Maps to description in backend
+  description: string; // Maps to description in backend
   completed: boolean; // Maps to Google Task 'status'
-  dueDate?: string;
+  deadline?: string; // Maps to deadline in backend
+  priority: string; // low, medium, high
+  expected_work_load?: number; // in hours
+  planned_start_time?: string; // ISO date string
+  planned_finish_time?: string; // ISO date string
   // rawGoogleTask?: any; // Optional: Store the original Google Task object if subtasks are full tasks
 }
 
@@ -47,9 +52,9 @@ const initialTasksSample: Task[] = [
     createdDate: 'Created 2 days ago',
     progress: 50,
     subtasks: [
-      { id: 's1-1', title: 'Research content', completed: true },
-      { id: 's1-2', title: 'Design slides', completed: false },
-      { id: 's1-3', title: 'Practice presentation', completed: false },
+      { id: 's1-1', title: 'Research content', description: 'Research content', completed: true, priority: 'high' },
+      { id: 's1-2', title: 'Design slides', description: 'Design slides', completed: false, priority: 'medium' },
+      { id: 's1-3', title: 'Practice presentation', description: 'Practice presentation', completed: false, priority: 'high' },
     ],
   },
   {
@@ -63,9 +68,9 @@ const initialTasksSample: Task[] = [
     createdDate: 'Created 1 day ago',
     progress: 33,
     subtasks: [
-      { id: 's2-1', title: 'Make shopping list', completed: true },
-      { id: 's2-2', title: 'Check pantry inventory', completed: false },
-      { id: 's2-3', title: "Visit farmer's market", completed: false },
+      { id: 's2-1', title: 'Make shopping list', description: 'Make shopping list', completed: true, priority: 'medium' },
+      { id: 's2-2', title: 'Check pantry inventory', description: 'Check pantry inventory', completed: false, priority: 'low' },
+      { id: 's2-3', title: "Visit farmer's market", description: "Visit farmer's market", completed: false, priority: 'medium' },
     ],
   },
   {
@@ -79,10 +84,10 @@ const initialTasksSample: Task[] = [
     createdDate: 'Created 5 days ago',
     progress: 0,
     subtasks: [
-      { id: 's3-1', title: 'Gather project details', completed: false },
-      { id: 's3-2', title: 'Design new sections', completed: false },
-      { id: 's3-3', title: 'Develop new components', completed: false },
-      { id: 's3-4', title: 'Deploy changes', completed: false },
+      { id: 's3-1', title: 'Gather project details', description: 'Gather project details', completed: false, priority: 'medium' },
+      { id: 's3-2', title: 'Design new sections', description: 'Design new sections', completed: false, priority: 'high' },
+      { id: 's3-3', title: 'Develop new components', description: 'Develop new components', completed: false, priority: 'high' },
+      { id: 's3-4', title: 'Deploy changes', description: 'Deploy changes', completed: false, priority: 'medium' },
     ],
   },
 ];

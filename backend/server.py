@@ -48,6 +48,10 @@ class Subtask(BaseModel):
     completed: bool = False
     deadline: Optional[datetime] = None
     order: int = 0
+    priority: str = "medium"  # low, medium, high
+    expected_work_load: Optional[float] = None  # in hours
+    planned_start_time: Optional[datetime] = None
+    planned_finish_time: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class Task(BaseModel):
@@ -80,12 +84,20 @@ class SubtaskCreate(BaseModel):
     description: str
     deadline: Optional[datetime] = None
     order: int = 0
+    priority: str = "medium"
+    expected_work_load: Optional[float] = None
+    planned_start_time: Optional[datetime] = None
+    planned_finish_time: Optional[datetime] = None
 
 class SubtaskUpdate(BaseModel):
     description: Optional[str] = None
     completed: Optional[bool] = None
     deadline: Optional[datetime] = None
     order: Optional[int] = None
+    priority: Optional[str] = None
+    expected_work_load: Optional[float] = None
+    planned_start_time: Optional[datetime] = None
+    planned_finish_time: Optional[datetime] = None
 
 class NaturalLanguageTaskInput(BaseModel):
     text: str
@@ -98,27 +110,14 @@ class EmotionalSupportType(BaseModel):
 # Together.ai integration functions
 async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     """Use Together.ai to analyze a natural language task input and break it down"""
+    prompt = f"""Analyze this task and break it down into subtasks: {text}
     
-    # Get current date information for context
-    current_date = datetime.utcnow()
-    current_date_str = current_date.strftime("%Y-%m-%d")
-    
-    prompt = f"""
-    You are an AI assistant that helps break down tasks into manageable subtasks and provides emotional support.
-    
-    CURRENT DATE: {current_date_str}
-    
-    USER INPUT: {text}
-    
-    Please analyze this task and provide:
-    1. A clear task title
-    2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
-    3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DD format)
-    4. A priority level (low, medium, high)
-    5. A brief encouraging message to help the user stay motivated
-    
-    Important instructions about dates:
-    - Today's date is {current_date_str}
+    Consider:
+    - Break down complex tasks into 3-7 logical subtasks
+    - Each subtask should be clear and actionable
+    - Assign appropriate priority levels (high, medium, low) to each subtask
+    - Estimate expected work load in hours for each subtask
+    - Suggest planned start and finish times for each subtask
     - If a specific date is mentioned (like "June 15th"), use that as the final deadline
     - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date
     - If a relative time is mentioned (like "in 3 days"), calculate the date based on today
@@ -127,17 +126,28 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
     - If no deadline is mentioned, set deadline to null
     
     Format your response as a JSON object with these keys: 
-    "title", "subtasks" (array of objects with "description" and "deadline"), "deadline", "priority", "emotional_support"
+    "title", "subtasks" (array of objects with "description", "deadline", "priority", "expected_work_load", "planned_start_time", "planned_finish_time"), "deadline", "priority", "emotional_support"
     
     Example format:
     {{
         "title": "Write quarterly report",
         "subtasks": [
-            {{ "description": "Gather sales data", "deadline": "2025-04-01" }},
-            {{ "description": "Analyze market trends", "deadline": "2025-04-05" }},
-            {{ "description": "Create charts and graphs", "deadline": "2025-04-10" }},
-            {{ "description": "Write executive summary", "deadline": "2025-04-12" }},
-            {{ "description": "Proofread and finalize", "deadline": "2025-04-14" }}
+            {{ 
+                "description": "Gather sales data",
+                "deadline": "2025-04-01",
+                "priority": "high",
+                "expected_work_load": 2.5,
+                "planned_start_time": "2025-03-30T09:00:00Z",
+                "planned_finish_time": "2025-03-30T17:00:00Z"
+            }},
+            {{ 
+                "description": "Analyze market trends",
+                "deadline": "2025-04-05",
+                "priority": "medium",
+                "expected_work_load": 4,
+                "planned_start_time": "2025-04-01T09:00:00Z",
+                "planned_finish_time": "2025-04-02T17:00:00Z"
+            }}
         ],
         "deadline": "2025-04-15",
         "priority": "high",
@@ -374,7 +384,11 @@ async def create_subtask(task_id: str, subtask_create: SubtaskCreate):
         task_id=task_id,
         description=subtask_create.description,
         deadline=subtask_create.deadline,
-        order=subtask_create.order or len(task.get("subtasks", []))
+        order=subtask_create.order or len(task.get("subtasks", [])),
+        priority=subtask_create.priority,
+        expected_work_load=subtask_create.expected_work_load,
+        planned_start_time=subtask_create.planned_start_time,
+        planned_finish_time=subtask_create.planned_finish_time
     )
     
     # Add subtask to task
@@ -510,16 +524,41 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
                 except:
                     # If parsing fails, don't set a deadline
                     logging.error(f"Failed to parse subtask deadline: {subtask_item['deadline']}")
+
+            # Process planned start time
+            planned_start = None
+            if subtask_item.get("planned_start_time"):
+                try:
+                    start_str = subtask_item["planned_start_time"]
+                    planned_start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                except:
+                    logging.error(f"Failed to parse planned start time: {subtask_item['planned_start_time']}")
+
+            # Process planned finish time
+            planned_finish = None
+            if subtask_item.get("planned_finish_time"):
+                try:
+                    finish_str = subtask_item["planned_finish_time"]
+                    planned_finish = datetime.fromisoformat(finish_str.replace("Z", "+00:00"))
+                except:
+                    logging.error(f"Failed to parse planned finish time: {subtask_item['planned_finish_time']}")
+
         else:
             # Handle legacy format (plain string)
             subtask_desc = str(subtask_item)
             subtask_deadline = None
+            planned_start = None
+            planned_finish = None
             
         subtask = Subtask(
             task_id=task.id,
             description=subtask_desc,
             deadline=subtask_deadline,
-            order=i
+            order=i,
+            priority=subtask_item.get("priority", "medium") if isinstance(subtask_item, dict) else "medium",
+            expected_work_load=subtask_item.get("expected_work_load") if isinstance(subtask_item, dict) else None,
+            planned_start_time=planned_start,
+            planned_finish_time=planned_finish
         )
         task.subtasks.append(subtask)
     

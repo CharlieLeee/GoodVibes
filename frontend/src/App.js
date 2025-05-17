@@ -57,114 +57,6 @@ const Navigation = ({ activeTab, setActiveTab, userId }) => {
   );
 };
 
-// Login/User Registration component
-const Login = ({ setUserId }) => {
-  const [username, setUsername] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    
-    if (!username.trim()) {
-      setError("Username is required");
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      // First check if the user already exists by username
-      try {
-        const checkResponse = await axios.get(`${API}/users/name/${username}`);
-        if (checkResponse.data) {
-          // If user exists, use their ID
-          localStorage.setItem("userId", checkResponse.data.id);
-          localStorage.setItem("username", checkResponse.data.username);
-          setUserId(checkResponse.data.id);
-          return;
-        }
-      } catch (err) {
-        // User not found, create a new one (this is expected)
-        console.log("User not found, creating a new account");
-      }
-      
-      // Create a new user
-      const response = await axios.post(`${API}/users`, { username });
-      localStorage.setItem("userId", response.data.id);
-      localStorage.setItem("username", response.data.username);
-      setUserId(response.data.id);
-    } catch (error) {
-      console.error("Login error:", error);
-      setError("Failed to create user. Please try again. If the problem persists, try using a default account by clicking the button below.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const useDefaultAccount = () => {
-    // Use the default account
-    localStorage.setItem("userId", "default-user-id");
-    localStorage.setItem("username", "default-user");
-    setUserId("default-user-id");
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
-        <h2 className="text-2xl font-bold text-center text-indigo-600 mb-6">
-          Welcome to AI Task Assistant
-        </h2>
-        <p className="text-gray-600 mb-6 text-center">
-          Your intelligent companion for productivity and emotional support.
-        </p>
-        
-        {error && (
-          <div className="bg-red-100 text-red-700 p-3 rounded-md mb-4">
-            {error}
-          </div>
-        )}
-        
-        <form onSubmit={handleLogin}>
-          <div className="mb-4">
-            <label htmlFor="username" className="block text-gray-700 mb-2">
-              Enter your name to continue
-            </label>
-            <input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              placeholder="Your name"
-            />
-          </div>
-          
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-indigo-600 text-white py-3 rounded-md hover:bg-indigo-700 transition duration-300 disabled:bg-indigo-400"
-          >
-            {loading ? "Creating account..." : "Get Started"}
-          </button>
-        </form>
-        
-        <div className="mt-4">
-          <button
-            onClick={useDefaultAccount}
-            className="w-full bg-gray-200 text-gray-700 py-3 rounded-md hover:bg-gray-300 transition duration-300"
-          >
-            Use Default Account
-          </button>
-        </div>
-        
-        <div className="mt-6 text-sm text-center text-gray-500">
-          No registration required. Just enter your name to get started!
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // Task Input component
 const TaskInput = ({ userId, setTasks }) => {
   const [taskText, setTaskText] = useState("");
@@ -334,43 +226,56 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
               onChange={toggleComplete}
               className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 mt-1"
             />
-            <div>
+            <div className="flex-1">
               <h3 className={`text-lg font-medium ${task.completed ? 'line-through text-gray-500' : 'text-gray-900'}`}>
                 {task.title}
               </h3>
-              {editingDate ? (
-                <div className="mt-1 flex items-center space-x-2">
-                  <input
-                    type="date"
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    className="text-sm border border-gray-300 rounded px-2 py-1"
-                  />
-                  <button 
-                    onClick={updateDueDate}
-                    className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700"
-                  >
-                    Save
-                  </button>
-                  <button 
-                    onClick={() => setEditingDate(false)}
-                    className="text-xs bg-gray-200 text-gray-800 px-2 py-1 rounded hover:bg-gray-300"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center">
-                  <p className={`text-sm ${new Date(task.deadline) < new Date() && !task.completed ? 'text-red-600' : 'text-gray-500'}`}>
-                    {task.deadline ? `Due: ${formatDate(task.deadline)}` : "No due date"}
-                  </p>
-                  <button 
-                    onClick={() => setEditingDate(true)}
-                    className="ml-2 text-xs text-indigo-600 hover:text-indigo-800"
-                  >
-                    Edit
-                  </button>
-                </div>
+              
+              {/* Priority and Due Date Display */}
+              <div className="flex items-center space-x-3 mt-1 mb-2">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                  ${task.priority === 'high' ? 'bg-red-100 text-red-800' : 
+                    task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
+                    'bg-green-100 text-green-800'}`}>
+                  {task.priority ? task.priority.charAt(0).toUpperCase() + task.priority.slice(1) : 'No'} Priority
+                </span>
+                {editingDate ? (
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="date"
+                      value={newDueDate}
+                      onChange={(e) => setNewDueDate(e.target.value)}
+                      className="text-sm border border-gray-300 rounded px-2 py-1"
+                    />
+                    <button 
+                      onClick={updateDueDate}
+                      className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700"
+                    >
+                      Save
+                    </button>
+                    <button 
+                      onClick={() => setEditingDate(false)}
+                      className="text-xs bg-gray-200 text-gray-800 px-2 py-1 rounded hover:bg-gray-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center">
+                    <span className={`text-sm ${new Date(task.deadline) < new Date() && !task.completed ? 'text-red-600' : 'text-gray-500'}`}>
+                      {task.deadline ? `Due: ${formatDate(task.deadline)}` : "No due date"}
+                    </span>
+                    <button 
+                      onClick={() => setEditingDate(true)}
+                      className="ml-2 text-xs text-indigo-600 hover:text-indigo-800"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
+              </div>
+              {task.description && (
+                <p className="text-sm text-gray-600 mb-2">{task.description}</p>
               )}
             </div>
           </div>
@@ -414,18 +319,39 @@ const TaskCard = ({ task, updateTask, deleteTask, refreshTasks }) => {
           
           <div className="mb-4">
             <h4 className="text-sm font-medium text-gray-700 mb-2">Subtasks:</h4>
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {task.subtasks.map((subtask) => (
-                <li key={subtask.id} className="flex items-center space-x-3">
-                  <input
-                    type="checkbox"
-                    checked={subtask.completed}
-                    onChange={() => toggleSubtaskComplete(subtask.id, subtask.completed)}
-                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
-                    {subtask.description}
-                  </span>
+                <li key={subtask.id} className="flex flex-col space-y-1 bg-gray-50 rounded-lg p-3">
+                  <div className="flex items-start space-x-3">
+                    <input
+                      type="checkbox"
+                      checked={subtask.completed}
+                      onChange={() => toggleSubtaskComplete(subtask.id, subtask.completed)}
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 mt-1"
+                    />
+                    <div className="flex-1">
+                      <span className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                        {subtask.description}
+                      </span>
+                      
+                      {/* Subtask Priority and Due Date Display */}
+                      <div className="flex items-center space-x-2 mt-1">
+                        {subtask.priority && (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                            ${subtask.priority === 'high' ? 'bg-red-50 text-red-700' : 
+                              subtask.priority === 'medium' ? 'bg-yellow-50 text-yellow-700' : 
+                              'bg-green-50 text-green-700'}`}>
+                            {subtask.priority.charAt(0).toUpperCase() + subtask.priority.slice(1)}
+                          </span>
+                        )}
+                        {subtask.deadline && (
+                          <span className={`text-xs ${new Date(subtask.deadline) < new Date() && !subtask.completed ? 'text-red-600' : 'text-gray-500'}`}>
+                            Due: {formatDate(subtask.deadline)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -923,29 +849,124 @@ const Dashboard = ({ userId }) => {
 // Main App component
 function App() {
   const [userId, setUserId] = useState(null);
-  
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [userError, setUserError] = useState("");
+  const [activeTab, setActiveTab] = useState("tasks");
+  // API constant is defined globally at the top of this file
+
   useEffect(() => {
-    // Check if user is already logged in
+    const setupDefaultUser = async () => {
+      setLoadingUser(true);
+      setUserError("");
+      const defaultUsername = "default-user";
+
+      try {
+        let userIdToSet;
+        let usernameToSet;
+
+        try {
+          // Check if "default-user" exists by name
+          const checkResponse = await axios.get(`${API}/users/name/${defaultUsername}`);
+          if (checkResponse.data && checkResponse.data.id) {
+            userIdToSet = checkResponse.data.id;
+            usernameToSet = checkResponse.data.username;
+          } else {
+            console.warn("Default user check response was successful but data is not as expected. Proceeding to create.");
+            throw new Error("Default user data not found in response, proceed to create.");
+          }
+        } catch (err) {
+          if (err.response && err.response.status === 404) {
+            console.log("Default user not found by name, creating...");
+            const createResponse = await axios.post(`${API}/users`, { username: defaultUsername });
+            userIdToSet = createResponse.data.id;
+            usernameToSet = createResponse.data.username;
+          } else {
+            console.error("Error checking/creating default user:", err);
+            throw err; // Re-throw to be caught by the outer catch
+          }
+        }
+        
+        localStorage.setItem("userId", userIdToSet);
+        localStorage.setItem("username", usernameToSet);
+        setUserId(userIdToSet);
+
+      } catch (error) {
+        console.error("Error setting up default account:", error);
+        setUserError("Failed to set up default account. Please ensure the backend is running and refresh the page.");
+      } finally {
+        setLoadingUser(false);
+      }
+    };
+
     const storedUserId = localStorage.getItem("userId");
-    
-    // For testing: reset to a known valid user ID if you're having issues
-    // Uncomment the next line to force a specific user ID
-    // localStorage.setItem("userId", "default-user-id");
-    
     if (storedUserId) {
       setUserId(storedUserId);
+      setLoadingUser(false);
+    } else {
+      setupDefaultUser();
     }
-  }, []);
+  }, []); // Runs once on mount
+
+  if (loadingUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
+          <p className="mt-4 text-lg text-gray-700">Loading your session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (userError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
+          <h2 className="text-2xl font-bold text-red-600 mb-4">Application Error</h2>
+          <p className="text-gray-700 mb-2">{userError}</p>
+          <p className="text-sm text-gray-500 mb-6">Please ensure the backend server is running and accessible.</p>
+          <button
+            onClick={() => {
+              localStorage.removeItem("userId");
+              localStorage.removeItem("username");
+              window.location.reload();
+            }}
+            className="mt-6 bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-300"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+  
+  if (!userId) {
+    // This state should ideally not be reached if loadingUser or userError is true.
+    // It acts as a fallback if user setup completes without setting userId and without an error.
+    return (
+         <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
+              <h2 className="text-2xl font-bold text-orange-600 mb-4">Initialization Incomplete</h2>
+              <p className="text-gray-700 mb-6">Could not initialize user session. Please try refreshing the page.</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-300"
+              >
+                Refresh
+              </button>
+            </div>
+         </div>
+    );
+  }
 
   return (
-    <div className="App">
-      <BrowserRouter>
-        {userId ? (
-          <Dashboard userId={userId} />
-        ) : (
-          <Login setUserId={setUserId} />
-        )}
-      </BrowserRouter>
+    <div className="min-h-screen bg-gray-100">
+      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userId={userId} />
+      <main className="container mx-auto p-4">
+        {activeTab === "tasks" && <TasksList userId={userId} />}
+        {activeTab === "calendar" && <CalendarView userId={userId} />}
+        {activeTab === "timeline" && <TimelineView userId={userId} />}
+      </main>
     </div>
   );
 }
