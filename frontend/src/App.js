@@ -69,6 +69,7 @@ const Navigation = ({ activeTab, setActiveTab, userId }) => {
 
 // Task Input component
 const TaskInput = ({ userId, setTasks }) => {
+  const [messages, setMessages] = useState([]);
   const [taskText, setTaskText] = useState("");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
@@ -76,6 +77,15 @@ const TaskInput = ({ userId, setTasks }) => {
   const [interimTranscript, setInterimTranscript] = useState("");
   const panelRef = useRef(null);
   const recognition = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     // Initialize speech recognition
@@ -146,6 +156,14 @@ const TaskInput = ({ userId, setTasks }) => {
       setInterimTranscript('');
     }
     
+    // Add user message
+    const userMessage = {
+      id: Date.now(),
+      text: taskText,
+      type: 'user'
+    };
+    setMessages(prev => [...prev, userMessage]);
+    
     setProcessing(true);
     setError("");
     
@@ -155,12 +173,29 @@ const TaskInput = ({ userId, setTasks }) => {
         user_id: userId
       });
       
+      // Add assistant message
+      const assistantMessage = {
+        id: Date.now() + 1,
+        text: `✨ Task created: ${response.data.title}`,
+        type: 'assistant',
+        task: response.data
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+      
       setTasks(prevTasks => [response.data, ...prevTasks]);
       setTaskText("");
       setInterimTranscript('');
     } catch (err) {
       console.error("Error processing task:", err);
       setError("Failed to process task. Please try again.");
+      
+      // Add error message
+      const errorMessage = {
+        id: Date.now() + 1,
+        text: "Sorry, I couldn't create that task. Please try again.",
+        type: 'error'
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setProcessing(false);
     }
@@ -187,151 +222,123 @@ const TaskInput = ({ userId, setTasks }) => {
           border: '1px solid rgba(255, 255, 255, 0.3)'
         }}
       >
-        <div className="flex-shrink-0 p-8 rounded-t-2xl" style={{
-          background: 'linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.2))',
+        {/* Header */}
+        <div className="flex-shrink-0 p-6 rounded-t-2xl" style={{
+          background: 'linear-gradient(to right, rgba(99, 102, 241, 0.8), rgba(168, 85, 247, 0.8))',
           borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
         }}>
-          <div className="flex items-center space-x-4 mb-4">
-            <div className="bg-gradient-to-r from-indigo-500/80 to-purple-500/80 p-3 rounded-2xl shadow-sm backdrop-blur-sm">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white/90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600/90 to-purple-600/90 bg-clip-text text-transparent">Create Task</h2>
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl">🌊</span>
+            <h2 className="text-xl font-bold text-white">GoodVibes Assistant</h2>
           </div>
+          <p className="text-white/80 text-sm mt-1">Let's create some positive tasks together!</p>
+        </div>
 
-          {error && (
-            <div className="bg-red-50/60 backdrop-blur-sm border border-red-100/30 p-4 rounded-2xl animate-fade-in">
-              <div className="flex items-start">
-                <svg className="h-5 w-5 text-red-500/80 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-red-700/90">{error}</span>
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          {messages.map(message => (
+            <div
+              key={message.id}
+              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[85%] rounded-2xl px-4 py-2 ${
+                  message.type === 'user'
+                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
+                    : message.type === 'error'
+                    ? 'bg-red-50 text-red-700 border border-red-100'
+                    : 'bg-white shadow-sm border border-indigo-100/20'
+                }`}
+              >
+                <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                {message.task && (
+                  <div className="mt-2 pt-2 border-t border-white/10 text-xs text-white/80">
+                    {message.task.subtasks.length > 0 && (
+                      <p>✓ Created with {message.task.subtasks.length} subtasks</p>
+                    )}
+                    {message.task.deadline && (
+                      <p>📅 Due: {formatDate(message.task.deadline)}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {processing && (
+            <div className="flex justify-start">
+              <div className="bg-white shadow-sm border border-indigo-100/20 rounded-2xl px-4 py-2">
+                <div className="flex items-center space-x-2">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <span className="text-sm text-gray-500">Creating your task...</span>
+                </div>
               </div>
             </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="p-8">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-4">
-                <label htmlFor="taskInput" className="block text-sm font-medium text-gray-700/80">
-                  What would you like to accomplish?
-                </label>
-                <div className="relative group">
-                  <textarea
-                    id="taskInput"
-                    value={taskText}
-                    onChange={(e) => setTaskText(e.target.value)}
-                    placeholder="Describe your task in natural language..."
-                    className="w-full p-4 bg-white/30 backdrop-blur-sm border border-white/30 rounded-2xl focus:ring-2 focus:ring-indigo-500/30 focus:border-transparent transition-all duration-300 shadow-sm group-hover:shadow-md resize-none"
-                    rows={4}
-                    style={{
-                      boxShadow: '0 2px 20px -2px rgba(0, 0, 0, 0.03)',
-                    }}
-                  />
-                  {interimTranscript && (
-                    <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/40 to-white/60 backdrop-blur-sm text-gray-600 italic border-t border-white/20 rounded-b-2xl">
-                      {interimTranscript}
-                    </div>
-                  )}
+        {/* Input Area */}
+        <div className="flex-shrink-0 p-4 bg-white/50 border-t border-indigo-100/20 rounded-b-2xl">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="relative">
+              <textarea
+                value={taskText}
+                onChange={(e) => setTaskText(e.target.value)}
+                placeholder="Describe your task in natural language..."
+                className="w-full p-3 bg-white/70 backdrop-blur-sm border border-indigo-100/30 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:border-transparent transition-all duration-300 shadow-sm resize-none text-sm"
+                rows={3}
+              />
+              {interimTranscript && (
+                <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/40 to-white/60 backdrop-blur-sm text-gray-600 italic border-t border-white/20 rounded-b-xl">
+                  {interimTranscript}
                 </div>
-              </div>
-              
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={processing}
-                  className="flex-1 bg-gradient-to-r from-indigo-500/80 to-purple-500/80 text-white/90 px-6 py-3 rounded-2xl hover:from-indigo-600/80 hover:to-purple-600/80 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center justify-center space-x-2 transform hover:scale-[1.01] active:scale-[0.99] backdrop-blur-sm"
-                >
-                  {processing ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-                      </svg>
-                      <span>Create Task</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleListening}
-                  className={`p-3 rounded-2xl transition-all duration-300 shadow-sm hover:shadow-md flex items-center justify-center transform hover:scale-[1.01] active:scale-[0.99] backdrop-blur-sm ${
-                    isListening
-                      ? 'bg-gradient-to-r from-red-400/80 to-pink-400/80 text-white/90 hover:from-red-500/80 hover:to-pink-500/80'
-                      : 'bg-white/30 text-indigo-600/90 border border-white/30 hover:bg-white/40'
-                  }`}
-                  title={isListening ? 'Stop recording' : 'Start voice input'}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-6 w-6"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </form>
-            
-            {isListening && (
-              <div className="mt-6 bg-gradient-to-r from-green-50/30 to-emerald-50/30 p-4 rounded-2xl border border-green-100/20 animate-pulse backdrop-blur-sm">
-                <div className="flex items-center text-green-700/90">
-                  <div className="relative">
-                    <div className="absolute -inset-1 bg-green-500/40 rounded-full animate-ping opacity-20"></div>
-                    <div className="relative h-2 w-2 bg-green-500/80 rounded-full"></div>
-                  </div>
-                  <span className="ml-3 text-sm font-medium">Listening... Speak now</span>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-8 bg-gradient-to-r from-indigo-50/20 to-purple-50/20 rounded-2xl p-6 border border-indigo-100/20 backdrop-blur-sm">
-              <h3 className="text-sm font-semibold text-indigo-800/80 mb-4 flex items-center">
-                <svg className="h-5 w-5 mr-2 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                Tips for Better Task Creation
-              </h3>
-              <ul className="space-y-3 text-sm text-indigo-700/70">
-                <li className="flex items-center">
-                  <svg className="h-4 w-4 mr-2 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  Include specific deadlines (e.g., "by next Friday")
-                </li>
-                <li className="flex items-center">
-                  <svg className="h-4 w-4 mr-2 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  Specify priority level if important
-                </li>
-                <li className="flex items-center">
-                  <svg className="h-4 w-4 mr-2 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                  </svg>
-                  Add relevant context and details
-                </li>
-              </ul>
+              )}
             </div>
-          </div>
+            
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={processing || !taskText.trim()}
+                className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-500 text-white px-4 py-2 rounded-xl hover:from-indigo-600 hover:to-purple-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 text-sm font-medium"
+              >
+                {processing ? (
+                  <span>Creating...</span>
+                ) : (
+                  <>
+                    <span>Create Task</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                    </svg>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`p-2 rounded-xl transition-all duration-300 flex items-center justify-center ${
+                  isListening
+                    ? 'bg-red-500 text-white hover:bg-red-600'
+                    : 'bg-white/70 text-indigo-600 hover:bg-white border border-indigo-100/30'
+                }`}
+                title={isListening ? 'Stop recording' : 'Start voice input'}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                </svg>
+              </button>
+            </div>
+          </form>
         </div>
+
+        {error && (
+          <div className="absolute top-4 left-4 right-4 bg-red-50 text-red-700 px-4 py-2 rounded-lg border border-red-100 animate-fade-in">
+            {error}
+          </div>
+        )}
       </div>
 
       <style jsx>{`
@@ -351,6 +358,15 @@ const TaskInput = ({ userId, setTasks }) => {
         
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
           background: rgba(99, 102, 241, 0.2);
+        }
+
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-fade-in {
+          animation: fade-in 0.3s ease-out forwards;
         }
       `}</style>
     </>
