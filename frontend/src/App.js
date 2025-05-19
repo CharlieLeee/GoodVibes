@@ -130,6 +130,106 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+  
+  // Fetch chat history when component mounts
+  useEffect(() => {
+    const fetchChatHistory = async () => {
+      if (userId) {
+        try {
+          const response = await axios.get(`${API}/chat/history/${userId}`);
+          if (response.data && response.data.length > 0) {
+            // Convert API format to our frontend format
+            const formattedMessages = response.data.map((message, index) => ({
+              id: Date.now() + index,
+              type: message.role === 'user' ? 'user' : 'ai',
+              text: message.content,
+              timestamp: new Date(message.timestamp)
+            }));
+            setChatMessages(formattedMessages);
+          }
+        } catch (error) {
+          console.error("Error fetching chat history:", error);
+        }
+      }
+    };
+    
+    fetchChatHistory();
+  }, [userId]);
+
+  useEffect(() => {
+    // Scroll to bottom of chat container when messages change
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
+  const toggleChatMode = () => {
+    setIsChatMode(!isChatMode);
+    setTaskText(""); // Clear text when switching modes
+  };
+  
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    
+    console.log("Submit pressed. Current taskText:", taskText, "Trimmed length:", taskText.trim().length);
+    
+    if (!taskText.trim()) {
+      return;
+    }
+    
+    // Add user message to chat
+    const userMessage = {
+      id: Date.now(),
+      type: 'user',
+      text: taskText,
+      timestamp: new Date()
+    };
+    
+    setChatMessages(prev => [...prev, userMessage]);
+    setTaskText('');
+    setIsLoadingChat(true);
+    
+    try {
+      // Send to backend
+      const response = await axios.post(`${API}/chat`, {
+        message: userMessage.text,
+        user_id: userId
+      });
+      
+      // Add AI response to chat
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        text: response.data.response,
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, aiMessage]);
+      
+      // Check if a task was created and refresh tasks if needed
+      if (response.data.response.includes("Task") || 
+          response.data.response.includes("task") || 
+          response.data.response.includes("created") || 
+          response.data.response.includes("✅")) {
+        // Refresh tasks in the parent component
+        await fetchTasks();
+      }
+    } catch (err) {
+      console.error("Error in chat:", err);
+      
+      // Add error message
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        text: "Sorry, I encountered an error. Please try again.",
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoadingChat(false);
+    }
+  };
 
   useEffect(() => {
     // Initialize speech recognition
@@ -230,11 +330,13 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
       };
       setMessages(prev => [...prev, assistantMessage]);
       
+      // Update tasks state immediately with the new task
       setTasks(prevTasks => [response.data, ...prevTasks]);
-      setTaskText("");
-      setInterimTranscript('');
-      // Automatically refresh tasks after creating a new task
-      fetchTasks();
+      
+      // Call parent fetchTasks function to ensure parent components are updated
+      await fetchTasks();
+      
+      console.log("Task created successfully:", response.data);
     } catch (err) {
       console.error("Error processing task:", err);
       setError("Failed to process task. Please try again.");
@@ -252,83 +354,6 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
       }
     } finally {
       setProcessing(false);
-    }
-  };
-  
-  useEffect(() => {
-    // Scroll to bottom of chat container when messages change
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [chatMessages]);
-
-  const toggleChatMode = () => {
-    setIsChatMode(!isChatMode);
-    setTaskText(""); // Clear text when switching modes
-  };
-  
-  const handleChatSubmit = async (e) => {
-    e.preventDefault();
-    
-    console.log("Submit pressed. Current taskText:", taskText, "Trimmed length:", taskText.trim().length);
-    
-    if (!taskText.trim()) {
-      return;
-    }
-    
-    // Add user message to chat
-    const userMessage = {
-      id: Date.now(),
-      type: 'user',
-      text: taskText,
-      timestamp: new Date()
-    };
-    
-    setChatMessages(prev => [...prev, userMessage]);
-    setTaskText('');
-    setIsLoadingChat(true);
-    
-    try {
-      // Send to backend
-      const response = await axios.post(`${API}/chat`, {
-        message: userMessage.text,
-        user_id: userId
-      });
-      
-      // Add AI response to chat
-      const aiMessage = {
-        id: Date.now() + 1,
-        type: 'ai',
-        text: response.data.response,
-        timestamp: new Date()
-      };
-      
-      setChatMessages(prev => [...prev, aiMessage]);
-      
-      // Check if a task was created and refresh tasks if needed
-      if (response.data.response.includes("Task") && response.data.response.includes("created successfully")) {
-        // Refresh tasks in the parent component
-        try {
-          const tasksResponse = await axios.get(`${API}/tasks/user/${userId}`);
-          setTasks(tasksResponse.data);
-        } catch (refreshError) {
-          console.error("Error refreshing tasks:", refreshError);
-        }
-      }
-    } catch (err) {
-      console.error("Error in chat:", err);
-      
-      // Add error message
-      const errorMessage = {
-        id: Date.now() + 1,
-        type: 'ai',
-        text: "Sorry, I encountered an error. Please try again.",
-        timestamp: new Date()
-      };
-      
-      setChatMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoadingChat(false);
     }
   };
 
@@ -1039,15 +1064,22 @@ const TasksList = ({ userId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("active"); // all, active, completed
+  const [lastRefresh, setLastRefresh] = useState(Date.now());
 
+  // Refresh when userId changes or lastRefresh changes
   useEffect(() => {
-    fetchTasks();
-  }, [userId]);
+    if (userId) {
+      console.log("Fetching tasks for user:", userId);
+      fetchTasks();
+    }
+  }, [userId, lastRefresh]);
 
   const fetchTasks = async () => {
+    console.log("TasksList: fetchTasks called");
     setLoading(true);
     try {
       const response = await axios.get(`${API}/tasks/user/${userId}`);
+      console.log("TasksList: Fetched tasks:", response.data.length);
       setTasks(response.data);
       setError("");
     } catch (err) {
@@ -1056,6 +1088,12 @@ const TasksList = ({ userId }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Call this to force a refresh from another component
+  const refreshTasks = () => {
+    console.log("TasksList: refreshTasks triggered");
+    setLastRefresh(Date.now());
   };
 
   const updateTask = async (taskId, updateData) => {
@@ -1167,7 +1205,7 @@ const TasksList = ({ userId }) => {
                 task={task}
                 updateTask={updateTask}
                 deleteTask={deleteTask}
-                refreshTasks={fetchTasks}
+                refreshTasks={refreshTasks}
               />
             ))}
           </div>
@@ -1766,78 +1804,83 @@ const Dashboard = ({ userId }) => {
 
 // Main App component
 function App() {
+  // State variables
   const [userId, setUserId] = useState(null);
-  const [loadingUser, setLoadingUser] = useState(true);
-  const [userError, setUserError] = useState("");
-  const [activeTab, setActiveTab] = useState("tasks");
   const [tasks, setTasks] = useState([]);
-
-  const fetchTasks = async () => {
-    if (userId) {
-      try {
-        const response = await axios.get(`${API}/tasks/user/${userId}`);
-        setTasks(response.data);
-      } catch (err) {
-        console.error("Error fetching tasks:", err);
-      }
-    }
-  };
-
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [currentView, setCurrentView] = useState("tasks"); // tasks, create, stats
+  const [taskStats, setTaskStats] = useState(null);
+  const [aiFeedback, setAIFeedback] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [tasksLastRefresh, setTasksLastRefresh] = useState(Date.now());
+  
+  // Initialize user
   useEffect(() => {
     const setupDefaultUser = async () => {
-      setLoadingUser(true);
-      setUserError("");
       const defaultUsername = "default-user";
-
+      
       try {
-        let userIdToSet;
-        let usernameToSet;
-
-        try {
-          const checkResponse = await axios.get(`${API}/users/name/${defaultUsername}`);
-          if (checkResponse.data && checkResponse.data.id) {
-            userIdToSet = checkResponse.data.id;
-            usernameToSet = checkResponse.data.username;
-          } else {
-            throw new Error("Default user data not found in response, proceed to create.");
-          }
-        } catch (err) {
-          if (err.response && err.response.status === 404) {
-            console.log("Default user not found by name, creating...");
+        // First try to get the existing user
+        let response = await axios.get(`${API}/users/name/${defaultUsername}`);
+        setUserId(response.data.id);
+      } catch (err) {
+        if (err.response && err.response.status === 404) {
+          // If user doesn't exist, create one
+          try {
             const createResponse = await axios.post(`${API}/users`, { username: defaultUsername });
-            userIdToSet = createResponse.data.id;
-            usernameToSet = createResponse.data.username;
-          } else {
-            throw err;
+            setUserId(createResponse.data.id);
+          } catch (createErr) {
+            console.error("Error creating user:", createErr);
+            setError("Failed to initialize user. Please try again.");
           }
+        } else {
+          console.error("Error getting user:", err);
+          setError("Failed to initialize user. Please try again.");
         }
-        
-        localStorage.setItem("userId", userIdToSet);
-        localStorage.setItem("username", usernameToSet);
-        setUserId(userIdToSet);
-
-      } catch (error) {
-        console.error("Error setting up default account:", error);
-        setUserError("Failed to set up default account. Please ensure the backend is running and refresh the page.");
       } finally {
-        setLoadingUser(false);
+        setLoading(false);
       }
     };
-
-    const storedUserId = localStorage.getItem("userId");
-    if (storedUserId) {
-      setUserId(storedUserId);
-      setLoadingUser(false);
-    } else {
-      setupDefaultUser();
-    }
+    
+    setupDefaultUser();
   }, []);
-
-  useEffect(() => {
+  
+  // Fetch tasks from the backend
+  const fetchTasks = async () => {
+    if (!userId) return;
+    
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API}/tasks/user/${userId}`);
+      console.log("App: Fetched tasks:", response.data.length);
+      setTasks(response.data);
+      setError(null);
+    } catch (err) {
+      console.error("Error fetching tasks:", err);
+      setError("Failed to load tasks. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Function to refresh tasks state across components
+  const refreshAllTasks = () => {
+    console.log("App: refreshAllTasks triggered");
+    setTasksLastRefresh(Date.now());
     fetchTasks();
-  }, [userId]);
-
-  if (loadingUser) {
+  };
+  
+  // When user changes or tasksLastRefresh changes, fetch their tasks
+  useEffect(() => {
+    if (userId) {
+      console.log("App: Fetching tasks after user/refresh change");
+      fetchTasks();
+    }
+  }, [userId, tasksLastRefresh]);
+  
+  if (loading && !userId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -1847,20 +1890,16 @@ function App() {
       </div>
     );
   }
-
-  if (userError) {
+  
+  if (error && !userId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
           <h2 className="text-2xl font-bold text-red-600 mb-4">Application Error</h2>
-          <p className="text-gray-700 mb-2">{userError}</p>
+          <p className="text-gray-700 mb-2">{error}</p>
           <p className="text-sm text-gray-500 mb-6">Please ensure the backend server is running and accessible.</p>
           <button
-            onClick={() => {
-              localStorage.removeItem("userId");
-              localStorage.removeItem("username");
-              window.location.reload();
-            }}
+            onClick={() => window.location.reload()}
             className="mt-6 bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-300"
           >
             Retry
@@ -1869,34 +1908,21 @@ function App() {
       </div>
     );
   }
-  
-  if (!userId) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
-          <h2 className="text-2xl font-bold text-orange-600 mb-4">Initialization Incomplete</h2>
-          <p className="text-gray-700 mb-6">Could not initialize user session. Please try refreshing the page.</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-300"
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userId={userId} />
+      <Navigation activeTab={currentView} setActiveTab={setCurrentView} userId={userId} />
       <main className="container mx-auto p-6 pr-[400px]">
-        {activeTab === "tasks" && <TasksList userId={userId} />}
-        {activeTab === "calendar" && <CalendarView userId={userId} />}
-        {activeTab === "timeline" && <TimelineView userId={userId} />}
-        {activeTab === "statistics" && <Statistics userId={userId} />}
+        {currentView === "tasks" && <TasksList userId={userId} key={`tasks-${tasksLastRefresh}`} />}
+        {currentView === "calendar" && <CalendarView userId={userId} />}
+        {currentView === "timeline" && <TimelineView userId={userId} />}
+        {currentView === "statistics" && <Statistics userId={userId} />}
       </main>
-      <TaskInput userId={userId} setTasks={setTasks} fetchTasks={fetchTasks} />
+      <TaskInput 
+        userId={userId} 
+        setTasks={setTasks} 
+        fetchTasks={refreshAllTasks} 
+      />
     </div>
   );
 }

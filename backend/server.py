@@ -13,6 +13,7 @@ from typing import List, Optional, Dict, Any, Union, Literal, Type
 import uuid
 from datetime import datetime, timedelta
 import time
+import asyncio
 
 # LangChain imports
 from langchain_together import ChatTogether
@@ -51,6 +52,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -321,7 +326,7 @@ def get_agent_tools(user_id: str):
             if priority not in ["low", "medium", "high"]:
                 priority = "medium"
                 
-            # Create a placeholder response until the async function completes
+            # Create task data
             task_data = {
                 "title": title,
                 "description": description,
@@ -330,11 +335,33 @@ def get_agent_tools(user_id: str):
                 "user_id": user_id
             }
             
-            # Add to the global pending tasks list
-            global pending_tasks
-            pending_tasks.append(task_data)
+            # Create task immediately but don't block
+            # We'll use a separate event loop to avoid interfering with FastAPI's
+            import asyncio
+            try:
+                # Try to use an existing event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Create a new loop if the current one is running
+                    loop = asyncio.new_event_loop()
+                    future = asyncio.run_coroutine_threadsafe(
+                        create_task_from_llm(task_data, user_id),
+                        loop
+                    )
+                    task_result = future.result(30)  # 30 second timeout
+                else:
+                    # Use the current loop if it's not running
+                    task_result = loop.run_until_complete(
+                        create_task_from_llm(task_data, user_id)
+                    )
+            except RuntimeError:
+                # If we're in a thread that doesn't have an event loop
+                task_result = asyncio.run(create_task_from_llm(task_data, user_id))
             
-            return f"Task '{title}' will be created with {priority} priority" + (f" and deadline {deadline}" if deadline else ".") + " The task is being processed."
+            if "error" in task_result:
+                return f"Error: {task_result['error']}"
+            
+            return f"✅ Task '{task_result['title']}' has been created with {task_result['priority']} priority" + (f" and deadline {task_result['deadline']}" if task_result['deadline'] != "No deadline" else ".")
         except Exception as e:
             logging.error(f"Error in synchronous task creation: {str(e)}")
             return f"Error creating task: {str(e)}"
@@ -343,14 +370,33 @@ def get_agent_tools(user_id: str):
     def decompose_task_sync(task_text: str) -> str:
         """Decompose a task into subtasks using AI"""
         try:
-            # Add to the pending analyzed tasks list
-            global pending_analyzed_tasks
-            pending_analyzed_tasks.append({
-                "text": task_text,
-                "user_id": user_id
-            })
+            # Process the task immediately but don't block
+            # We'll use a separate event loop to avoid interfering with FastAPI's
+            import asyncio
+            try:
+                # Try to use an existing event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Create a new loop if the current one is running
+                    loop = asyncio.new_event_loop()
+                    future = asyncio.run_coroutine_threadsafe(
+                        process_natural_language_task_internal(task_text, user_id),
+                        loop
+                    )
+                    task_result = future.result(60)  # 60 second timeout
+                else:
+                    # Use the current loop if it's not running
+                    task_result = loop.run_until_complete(
+                        process_natural_language_task_internal(task_text, user_id)
+                    )
+            except RuntimeError:
+                # If we're in a thread that doesn't have an event loop
+                task_result = asyncio.run(process_natural_language_task_internal(task_text, user_id))
             
-            return f"Your task '{task_text}' will be analyzed and broken down into subtasks. The AI will identify the main task title, suggested subtasks, appropriate deadline, and priority level. This process is happening in the background."
+            if "error" in task_result:
+                return f"Error: {task_result['error']}"
+            
+            return f"✅ Task '{task_result['title']}' has been created with {task_result.get('priority', 'medium')} priority and broken down into {task_result['subtasks_count']} subtasks" + (f", due by {task_result['deadline']}" if task_result['deadline'] != "No deadline" else ".")
         except Exception as e:
             logging.error(f"Error in task decomposition: {str(e)}")
             return f"Error decomposing task: {str(e)}"
@@ -1078,8 +1124,7 @@ def get_create_task_tool(user_id: str):
             if priority not in ["low", "medium", "high"]:
                 priority = "medium"
                 
-            # Create a placeholder response until the async function completes
-            # This approach avoids issues with event loops in FastAPI
+            # Create task data
             task_data = {
                 "title": title,
                 "description": description,
@@ -1088,11 +1133,33 @@ def get_create_task_tool(user_id: str):
                 "user_id": user_id
             }
             
-            # Add to the global pending tasks list
-            global pending_tasks
-            pending_tasks.append(task_data)
+            # Create task immediately but don't block
+            # We'll use a separate event loop to avoid interfering with FastAPI's
+            import asyncio
+            try:
+                # Try to use an existing event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Create a new loop if the current one is running
+                    loop = asyncio.new_event_loop()
+                    future = asyncio.run_coroutine_threadsafe(
+                        create_task_from_llm(task_data, user_id),
+                        loop
+                    )
+                    task_result = future.result(30)  # 30 second timeout
+                else:
+                    # Use the current loop if it's not running
+                    task_result = loop.run_until_complete(
+                        create_task_from_llm(task_data, user_id)
+                    )
+            except RuntimeError:
+                # If we're in a thread that doesn't have an event loop
+                task_result = asyncio.run(create_task_from_llm(task_data, user_id))
             
-            return f"Task '{title}' will be created with {priority} priority" + (f" and deadline {deadline}" if deadline else ".") + " The task is being processed."
+            if "error" in task_result:
+                return f"Error: {task_result['error']}"
+            
+            return f"✅ Task '{task_result['title']}' has been created with {task_result['priority']} priority" + (f" and deadline {task_result['deadline']}" if task_result['deadline'] != "No deadline" else ".")
         except Exception as e:
             logging.error(f"Error in synchronous task creation: {str(e)}")
             return f"Error creating task: {str(e)}"
@@ -1158,14 +1225,27 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
     logging.info(f"User ID: {chat_message.user_id}")
     
     try:
-        # Get or create chat history for this user
-        if chat_message.user_id not in chat_histories:
-            logging.info(f"Creating new chat history for user {chat_message.user_id}")
-            chat_histories[chat_message.user_id] = ChatMessageHistory()
+        # Get or create chat history from database
+        db_chat_history = await db.chat_history.find_one({"user_id": chat_message.user_id})
+        if not db_chat_history:
+            db_chat_history = {
+                "id": str(uuid.uuid4()),
+                "user_id": chat_message.user_id,
+                "messages": [],
+                "updated_at": datetime.utcnow()
+            }
+        
+        # Create in-memory chat history for LangChain
+        chat_memory = ChatMessageHistory()
+        for msg in db_chat_history.get("messages", []):
+            if msg["role"] == "user":
+                chat_memory.add_user_message(msg["content"])
+            else:
+                chat_memory.add_ai_message(msg["content"])
         
         # Create conversation memory with the chat history
         memory = ConversationBufferMemory(
-            chat_memory=chat_histories[chat_message.user_id],
+            chat_memory=chat_memory,
             memory_key="chat_history",
             return_messages=True
         )
@@ -1243,8 +1323,15 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
         )
         logging.info("Agent chain initialized successfully")
         
-        # Add the user message to chat history
-        chat_histories[chat_message.user_id].add_user_message(chat_message.message)
+        # Add the user message to database chat history
+        user_message = {"role": "user", "content": chat_message.message, "timestamp": datetime.utcnow()}
+        if "messages" not in db_chat_history:
+            db_chat_history["messages"] = []
+        db_chat_history["messages"].append(user_message)
+        db_chat_history["updated_at"] = datetime.utcnow()
+        
+        # Add to in-memory chat history for LangChain
+        chat_memory.add_user_message(chat_message.message)
         logging.info("User message added to chat history")
         
         # Get response from the agent
@@ -1258,12 +1345,24 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
             logging.error(f"Agent error: {str(agent_error)}")
             ai_response = "I encountered an error while processing your request. Please try again with a simpler question or task."
         
-        # Add the AI response to chat history
-        chat_histories[chat_message.user_id].add_ai_message(ai_response)
-        logging.info("AI response added to chat history")
+        # Add the AI response to database chat history
+        ai_message = {"role": "ai", "content": ai_response, "timestamp": datetime.utcnow()}
+        db_chat_history["messages"].append(ai_message)
+        db_chat_history["updated_at"] = datetime.utcnow()
         
-        # Schedule background task to process any pending tasks
-        background_tasks.add_task(process_pending_tasks)
+        # Save chat history to database
+        await db.chat_history.replace_one(
+            {"user_id": chat_message.user_id}, 
+            db_chat_history, 
+            upsert=True
+        )
+        
+        # Add to in-memory chat history for LangChain
+        chat_memory.add_ai_message(ai_response)
+        logging.info("AI response added to chat history and saved to database")
+        
+        # Process pending tasks immediately
+        await process_pending_tasks()
         
         return {"response": ai_response}
     except Exception as e:
@@ -1466,21 +1565,6 @@ async def get_user_statistics_feedback(user_id: str):
 async def root():
     return {"message": "AI Task Assistant API"}
 
-
-# Include the router in the main app
-app.include_router(api_router)
-# Add CORS middleware BEFORE including the router
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
 
 # Include the router in the main app
 app.include_router(api_router)
