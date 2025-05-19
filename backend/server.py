@@ -22,6 +22,7 @@ from langchain.schema import SystemMessage, HumanMessage, AIMessage
 from langchain.tools import Tool, StructuredTool
 from langchain.agents import AgentExecutor, AgentType, initialize_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, HumanMessagePromptTemplate
+from langchain.chat_models import ChatOpenAI
 
 # Root directory and environment loading
 ROOT_DIR = Path(__file__).parent
@@ -35,6 +36,9 @@ db = client[os.environ["DB_NAME"]]
 # Together.ai API key
 TOGETHER_API_KEY = os.environ.get("TOGETHER_API_KEY")
 TOGETHER_API_URL = "https://api.together.xyz/v1/completions"
+
+# Add OpenAI API key
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 # Create the main app without a prefix
 app = FastAPI(title="AI Task Assistant API")
@@ -387,81 +391,95 @@ def get_agent_tools(user_id: str):
 
 # Together.ai integration functions
 async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
-    """Use Together.ai to analyze a natural language task input and break it down"""
+    """Use OpenAI to analyze a natural language task input and break it down"""
 
     # Get current date information for context
     current_date = datetime.utcnow()
     current_date_str = current_date.strftime("%Y-%m-%d")
+    
+    # Check if OpenAI API key is available
+    if not OPENAI_API_KEY:
+        logging.error("OpenAI API key not found for task analysis")
+        # Return simple fallback response
+        return {
+            "title": text,
+            "subtasks": ["Review task details"],
+            "deadline": None,
+            "priority": "medium",
+            "emotional_support": "Let's start by clarifying what needs to be done."
+        }
 
-    prompt = f"""
-    You are an AI assistant that helps break down tasks into manageable subtasks and provides emotional support.
+    # Initialize OpenAI model
+    logging.info("Initializing OpenAI model for task analysis")
+    llm = ChatOpenAI(
+        model="gpt-4o",
+        temperature=0.7, 
+        max_tokens=1024,
+        openai_api_key=OPENAI_API_KEY
+    )
     
-    CURRENT DATE: {current_date_str}
-    
-    USER INPUT: {text}
-    
-    Please analyze this task and provide:
-    1. A clear task title
-    2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
-       - Each subtask MUST include a 'title', a 'description', and a 'deadline' field
-       - Each deadline MUST include a specific time (HH:MM) in 24-hour format
-    3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DDTHH:MM format)
-    4. A priority level (low, medium, high)
-    5. A brief encouraging message to help the user stay motivated
-    
-    Important instructions about dates and times:
-    - Today's date is {current_date_str}
-    - All deadlines MUST include specific times in 24-hour format (HH:MM)
-    - If a specific date is mentioned (like "June 15th"), use that date with a reasonable time (e.g., "2024-06-15T17:00")
-    - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date and use a reasonable time
-    - If a relative time is mentioned (like "in 3 days"), calculate the date based on today and use a reasonable time
-    - For subtask deadlines, distribute them evenly between {current_date_str} and the final deadline
-    - Always return dates in ISO format with time (YYYY-MM-DDTHH:MM)
-    - If no deadline is mentioned, set deadline to null
-    
-    Format your response as a JSON object with these keys: 
-    "title", "subtasks" (array of objects with "title", "description", and "deadline"), "deadline", "priority", "emotional_support"
-    
-    Example format:
-    {{
-        "title": "Write quarterly report",
-        "subtasks": [
-            {{ "title": "Collect sales data", "description": "Gather all sales data from Q1", "deadline": "2025-04-01T14:00" }},
-            {{ "title": "Analyze market trends", "description": "Review competitor performance", "deadline": "2025-04-05T16:30" }},
-            {{ "title": "Create charts and graphs", "description": "Visualize key metrics", "deadline": "2025-04-10T15:00" }},
-            {{ "title": "Write executive summary", "description": "Summarize findings", "deadline": "2025-04-12T17:00" }},
-            {{ "title": "Proofread and finalize", "description": "Check for errors and finalize report", "deadline": "2025-04-14T16:00" }}
-        ],
-        "deadline": "2025-04-15T17:00",
-        "priority": "high",
-        "emotional_support": "You've got this! Breaking down this report makes it much more manageable."
-    }}
-    
-    Respond with ONLY the JSON, no explanations or other text.
-    """
-
-    headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
-
-    data = {
-        "model": "deepseek-ai/DeepSeek-R1",
-        "prompt": prompt,
-        "max_tokens": 1024,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40,
-    }
+    # Prepare the system and user messages
+    messages = [
+        {"role": "system", "content": "You are an AI assistant and an expert in time management that helps break down tasks into manageable subtasks and provides emotional support."},
+        {"role": "user", "content": f"""
+        CURRENT DATE: {current_date_str}
+        
+        USER INPUT: {text}
+        
+        Please analyze this task and provide:
+        1. A clear task title
+        2. A list of 3-5 subtasks to complete it, each with its own intermediate deadline
+           - Each subtask MUST include a 'title', a 'description', and a 'deadline' field
+           - Each deadline MUST include a specific time (HH:MM) in 24-hour format
+        3. A suggested final deadline if applicable (as ISO date in YYYY-MM-DDTHH:MM format)
+        4. A priority level (low, medium, high)
+        5. A brief encouraging message to help the user stay motivated
+        
+        Important instructions about dates and times:
+        - Today's date is {current_date_str}
+        - All deadlines MUST include specific times in 24-hour format (HH:MM)
+        - If a specific date is mentioned (like "June 15th"), use that date with a reasonable time (e.g., "2024-06-15T17:00")
+        - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date and use a reasonable time
+        - If a relative time is mentioned (like "in 3 days"), calculate the date based on today and use a reasonable time
+        - For subtask deadlines, distribute them reasonably between {current_date_str} and the final deadline based on your expert knowledge
+        - Always return dates in ISO format with time (YYYY-MM-DDTHH:MM)
+        - If no deadline is mentioned, set deadline to null
+        
+        Format your response as a JSON object with these keys: 
+        "title", "subtasks" (array of objects with "title", "description", and "deadline"), "deadline", "priority", "emotional_support"
+        
+        Example format:
+        {{
+            "title": "Write quarterly report",
+            "subtasks": [
+                {{ "title": "Collect sales data", "description": "Gather all sales data from Q1", "deadline": "2025-04-01T14:00" }},
+                {{ "title": "Analyze market trends", "description": "Review competitor performance", "deadline": "2025-04-05T16:30" }},
+                {{ "title": "Create charts and graphs", "description": "Visualize key metrics", "deadline": "2025-04-10T15:00" }},
+                {{ "title": "Write executive summary", "description": "Summarize findings", "deadline": "2025-04-12T17:00" }},
+                {{ "title": "Proofread and finalize", "description": "Check for errors and finalize report", "deadline": "2025-04-14T16:00" }}
+            ],
+            "deadline": "2025-04-15T17:00",
+            "priority": "high",
+            "emotional_support": "You've got this! Breaking down this report makes it much more manageable."
+        }}
+        
+        Respond with ONLY the JSON, no explanations or other text.
+        """}
+    ]
 
     try:
-        response = requests.post(TOGETHER_API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        result = response.json()
-
-        # Extract the generated text from the response
-        generated_text = result["choices"][0]["text"].strip()
+        # Call OpenAI API
+        logging.info("Calling OpenAI API for task analysis")
+        response = await llm.ainvoke(messages)
+        
+        # Extract content from the AIMessage
+        generated_text = response.content if hasattr(response, 'content') else str(response)
+        logging.info("Received response from OpenAI API for task analysis")
 
         # Parse the JSON from the generated text
         try:
             task_data = json.loads(generated_text)
+            logging.info(f"Successfully parsed task analysis JSON: {task_data.keys()}")
             return task_data
         except json.JSONDecodeError:
             # If the model didn't return valid JSON, try to extract JSON portion
@@ -472,9 +490,11 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
                 if json_start >= 0 and json_end > json_start:
                     json_str = generated_text[json_start:json_end]
                     task_data = json.loads(json_str)
+                    logging.info(f"Successfully extracted and parsed task analysis JSON: {task_data.keys()}")
                     return task_data
             except:
-                # If all parsing attempts fail, return a simple error response
+                logging.error(f"Failed to parse OpenAI response as JSON: {generated_text[:200]}...")
+                # Return a simple fallback response
                 return {
                     "title": text,
                     "subtasks": ["Review task details"],
@@ -484,7 +504,7 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
                 }
 
     except Exception as e:
-        logging.error(f"Error calling Together.ai API: {str(e)}")
+        logging.error(f"Error calling OpenAI API for task analysis: {str(e)}")
         # Fallback response
         return {
             "title": text,
@@ -496,7 +516,7 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
 
 
 async def generate_emotional_support(task_title: str, deadline: Optional[datetime] = None) -> str:
-    """Generate emotional support message based on task context"""
+    """Generate emotional support message based on task context using OpenAI"""
 
     # Create a context-aware prompt
     deadline_context = ""
@@ -511,43 +531,49 @@ async def generate_emotional_support(task_title: str, deadline: Optional[datetim
         else:
             deadline_context = f"This task is due in {days_until} days."
 
-    prompt = f"""
-    You are an AI assistant that provides encouraging, motivational messages to help users with their tasks.
-    
-    Task: {task_title}
-    {deadline_context}
-    
-    Generate a brief, supportive message (1-2 sentences) that:
-    - Acknowledges the task difficulty
-    - Provides encouragement
-    - Offers a positive perspective
-    
-    Your message should be warm, supportive and empathetic.
-    Respond with ONLY the supportive message, no explanations or other text.
-    """
+    # Check if OpenAI API key is available
+    if not OPENAI_API_KEY:
+        logging.error("OpenAI API key not found for generating emotional support")
+        return "You're making great progress! Keep going, you've got this."
 
-    headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
-
-    data = {
-        "model": "anthropic/claude-2",
-        "prompt": prompt,
-        "max_tokens": 100,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40,
-    }
+    # Initialize OpenAI model
+    logging.info("Initializing OpenAI model for emotional support")
+    llm = ChatOpenAI(
+        model="gpt-4o",
+        temperature=0.7,
+        max_tokens=100,
+        openai_api_key=OPENAI_API_KEY
+    )
+    
+    # Prepare messages for OpenAI
+    messages = [
+        {"role": "system", "content": "You are an AI assistant that provides encouraging, motivational messages to help users with their tasks."},
+        {"role": "user", "content": f"""
+        Task: {task_title}
+        {deadline_context}
+        
+        Generate a brief, supportive message (1-2 sentences) that:
+        - Acknowledges the task difficulty
+        - Provides encouragement
+        - Offers a positive perspective
+        
+        Your message should be warm, supportive and empathetic.
+        Respond with ONLY the supportive message, no explanations or other text.
+        """}
+    ]
 
     try:
-        response = requests.post(TOGETHER_API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        result = response.json()
-
-        # Extract the generated text
-        support_message = result["choices"][0]["text"].strip()
-        return support_message
+        # Call OpenAI API
+        logging.info("Calling OpenAI API for emotional support")
+        response = await llm.ainvoke(messages)
+        
+        # Extract content from the AIMessage
+        support_message = response.content if hasattr(response, 'content') else str(response)
+        logging.info("Received emotional support message from OpenAI")
+        return support_message.strip()
 
     except Exception as e:
-        logging.error(f"Error generating emotional support: {str(e)}")
+        logging.error(f"Error generating emotional support with OpenAI: {str(e)}")
         return "You're making great progress! Keep going, you've got this."
 
 
@@ -747,10 +773,12 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
     # Verify user exists
     user = await db.users.find_one({"id": input_data.user_id})
     if not user:
+        logging.error(f"User not found when processing task: {input_data.user_id}")
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Check if Together.ai API key is available
-    if not TOGETHER_API_KEY:
+    # Check if OpenAI API key is available, fallback to TogetherAI if available
+    if not OPENAI_API_KEY and not TOGETHER_API_KEY:
+        logging.error("No LLM API keys available for task processing")
         # Create a simple task without AI processing
         task = Task(
             user_id=input_data.user_id,
@@ -762,8 +790,12 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
         await db.tasks.insert_one(task_dict)
         return task
     
-    # Process task with Together.ai
+    # Use OpenAI by default, fallback to TogetherAI if OpenAI key not available
+    logging.info(f"Processing task with text: {input_data.text}")
+    
+    # Process task with LLM
     task_analysis = await analyze_task_with_llm(input_data.text)
+    logging.info(f"Task analysis result: {json.dumps(task_analysis, default=str)[:200]}...")
     
     # Create deadline if provided
     deadline = None
@@ -771,15 +803,16 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
         try:
             # Try to parse the date - handle both full ISO and date-only formats
             date_str = task_analysis["deadline"]
+            logging.info(f"Parsing deadline: {date_str}")
             if 'T' in date_str:
                 deadline = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
             else:
                 # For YYYY-MM-DD format, add time (end of day)
                 deadline = datetime.fromisoformat(f"{date_str}T23:59:59")
-        except:
+            logging.info(f"Parsed deadline: {deadline}")
+        except Exception as e:
             # If deadline parsing fails, log the error
-            logging.error(f"Failed to parse deadline: {task_analysis['deadline']}")
-            # Don't set a default deadline - we'll let the user set it manually if needed
+            logging.error(f"Failed to parse deadline: {task_analysis['deadline']} - Error: {str(e)}")
     
     # Create task
     task = Task(
@@ -793,43 +826,55 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
     
     # Create subtasks
     subtasks_data = task_analysis.get("subtasks", [])
+    logging.info(f"Creating {len(subtasks_data)} subtasks")
+    
     for i, subtask_item in enumerate(subtasks_data):
-        # Handle both new format (object with description & deadline) and old format (string only)
-        if isinstance(subtask_item, dict):
-            subtask_desc = subtask_item.get("description", "")
+        try:
+            # Handle both new format (object with description & deadline) and old format (string only)
+            if isinstance(subtask_item, dict):
+                subtask_desc = subtask_item.get("description", "")
+                logging.info(f"Subtask {i+1} is a dictionary: {subtask_item}")
+                
+                # Process subtask deadline if provided
+                subtask_deadline = None
+                if subtask_item.get("deadline"):
+                    try:
+                        subtask_date_str = subtask_item["deadline"]
+                        logging.info(f"Parsing subtask deadline: {subtask_date_str}")
+                        if 'T' in subtask_date_str:
+                            subtask_deadline = datetime.fromisoformat(subtask_date_str.replace("Z", "+00:00"))
+                        else:
+                            # For YYYY-MM-DD format, add time (end of day)
+                            subtask_deadline = datetime.fromisoformat(f"{subtask_date_str}T23:59:59")
+                        logging.info(f"Parsed subtask deadline: {subtask_deadline}")
+                    except Exception as e:
+                        # If parsing fails, don't set a deadline
+                        logging.error(f"Failed to parse subtask deadline: {subtask_item['deadline']} - Error: {str(e)}")
+            else:
+                # Handle legacy format (plain string)
+                subtask_desc = str(subtask_item)
+                subtask_deadline = None
+                logging.info(f"Subtask {i+1} is a string: {subtask_desc}")
+                
+            # Set title based on item type - using .get only when it's a dictionary
+            subtask_title = subtask_item.get('title') if isinstance(subtask_item, dict) else subtask_desc
             
-            # Process subtask deadline if provided
-            subtask_deadline = None
-            if subtask_item.get("deadline"):
-                try:
-                    subtask_date_str = subtask_item["deadline"]
-                    if 'T' in subtask_date_str:
-                        subtask_deadline = datetime.fromisoformat(subtask_date_str.replace("Z", "+00:00"))
-                    else:
-                        # For YYYY-MM-DD format, add time (end of day)
-                        subtask_deadline = datetime.fromisoformat(f"{subtask_date_str}T23:59:59")
-                except:
-                    # If parsing fails, don't set a deadline
-                    logging.error(f"Failed to parse subtask deadline: {subtask_item['deadline']}")
-        else:
-            # Handle legacy format (plain string)
-            subtask_desc = str(subtask_item)
-            subtask_deadline = None
-            
-        # Set title based on item type - using .get only when it's a dictionary
-        subtask_title = subtask_item.get('title') if isinstance(subtask_item, dict) else subtask_desc
-        subtask = Subtask(
-            task_id=task.id,
-            title=subtask_title,
-            description=subtask_desc,
-            deadline=subtask_deadline,
-            order=i
-        )
-        task.subtasks.append(subtask)
+            subtask = Subtask(
+                task_id=task.id,
+                title=subtask_title,
+                description=subtask_desc,
+                deadline=subtask_deadline,
+                order=i
+            )
+            task.subtasks.append(subtask)
+            logging.info(f"Added subtask {i+1}: {subtask_title}")
+        except Exception as e:
+            logging.error(f"Error creating subtask {i+1}: {str(e)}")
     
     # Insert task
     task_dict = task.dict()
     await db.tasks.insert_one(task_dict)
+    logging.info(f"Task created successfully with ID: {task.id}")
     return task
 
 
@@ -1087,19 +1132,23 @@ async def _handle_create_task(query: str, user_id: str) -> str:
 
 # Chat API endpoint
 @api_router.post("/chat", response_model=ChatResponse)
-async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundTasks):
+async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundTasks, provider: Optional[str] = None):
     # Verify user exists
     user = await db.users.find_one({"id": chat_message.user_id})
     if not user:
+        logging.error(f"User not found with ID: {chat_message.user_id}")
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Check if Together.ai API key is available
-    if not TOGETHER_API_KEY:
-        return {"response": "Chat functionality is currently unavailable. Please set up your TOGETHER_API_KEY."}
+    # Determine provider: default to OpenAI if key is set, else TogetherAI
+    selected_provider = provider or "openai"
+    logging.info(f"Using LLM provider: {selected_provider}")
+    logging.info(f"Message content: {chat_message.message}")
+    logging.info(f"User ID: {chat_message.user_id}")
     
     try:
         # Get or create chat history for this user
         if chat_message.user_id not in chat_histories:
+            logging.info(f"Creating new chat history for user {chat_message.user_id}")
             chat_histories[chat_message.user_id] = ChatMessageHistory()
         
         # Create conversation memory with the chat history
@@ -1109,13 +1158,36 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
             return_messages=True
         )
         
-        # Initialize the LLM with TogetherAI
-        llm = ChatTogether(
-            model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
-            temperature=0.7,
-            max_tokens=1024,
-            together_api_key=TOGETHER_API_KEY
-        )
+        # Initialize the appropriate LLM based on provider
+        if selected_provider == "openai":
+            if not OPENAI_API_KEY:
+                logging.error("OpenAI API key not found in environment variables")
+                return {"response": "OpenAI chat functionality is unavailable. Please set up your OPENAI_API_KEY."}
+            
+            logging.info("Initializing OpenAI LLM")
+            llm = ChatOpenAI(
+                model="gpt-4o",
+                temperature=0.7,
+                max_tokens=1024,
+                openai_api_key=OPENAI_API_KEY
+            )
+            logging.info("OpenAI LLM initialized successfully")
+        elif selected_provider == "togetherai":
+            if not TOGETHER_API_KEY:
+                logging.error("TogetherAI API key not found in environment variables")
+                return {"response": "TogetherAI chat functionality is unavailable. Please set up your TOGETHER_API_KEY."}
+            
+            logging.info("Initializing TogetherAI LLM")
+            llm = ChatTogether(
+                model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
+                temperature=0.7,
+                max_tokens=1024,
+                together_api_key=TOGETHER_API_KEY
+            )
+            logging.info("TogetherAI LLM initialized successfully")
+        else:
+            logging.error(f"Unknown provider: {selected_provider}")
+            return {"response": f"Unknown provider: {selected_provider}. Please use 'openai' or 'togetherai'."}
         
         # Get all tools for the agent
         tools = get_agent_tools(chat_message.user_id)
@@ -1145,7 +1217,8 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
             "When you provide an answer to the user, make sure it is clear and concise. Do not generate very long responses."
         )
         
-        # Use the initialize_agent approach with a simpler agent type
+        # Use the initialize_agent approach
+        logging.info("Initializing agent chain")
         agent_chain = initialize_agent(
             tools,
             llm,
@@ -1156,20 +1229,26 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
             max_iterations=3,
             agent_kwargs={"system_message": system_message}
         )
+        logging.info("Agent chain initialized successfully")
         
         # Add the user message to chat history
         chat_histories[chat_message.user_id].add_user_message(chat_message.message)
+        logging.info("User message added to chat history")
         
         # Get response from the agent
         try:
+            logging.info("Invoking agent chain")
             response = await agent_chain.ainvoke({"input": chat_message.message})
             ai_response = response.get("output", "I'm sorry, I couldn't process your request.")
+            logging.info("Agent chain response received successfully")
+            logging.info(f"Response content: {ai_response}")
         except Exception as agent_error:
             logging.error(f"Agent error: {str(agent_error)}")
             ai_response = "I encountered an error while processing your request. Please try again with a simpler question or task."
         
         # Add the AI response to chat history
         chat_histories[chat_message.user_id].add_ai_message(ai_response)
+        logging.info("AI response added to chat history")
         
         # Schedule background task to process any pending tasks
         background_tasks.add_task(process_pending_tasks)
@@ -1180,7 +1259,7 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
         return {"response": "I'm sorry, I encountered an error. Please try again later."}
 
 async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) -> Dict[str, Any]:
-    """Use Together.ai to analyze task statistics and provide feedback"""
+    """Use OpenAI to analyze task statistics and provide feedback"""
     
     # Check if we have cached feedback that's still valid
     cache_key = f"{stats.total_tasks}_{stats.completed_tasks}_{stats.total_subtasks}_{stats.completed_subtasks}"
@@ -1189,9 +1268,9 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
         if time.time() - timestamp < CACHE_DURATION:
             return cached_feedback
 
-    # If no Together.ai API key, return service unavailable feedback
-    if not TOGETHER_API_KEY:
-        logging.error("Together.ai API key is not configured")
+    # If no OpenAI API key, return service unavailable feedback
+    if not OPENAI_API_KEY:
+        logging.error("OpenAI API key is not configured")
         service_unavailable_feedback = {
             "summary": "AI Analysis Service Unavailable",
             "insights": [
@@ -1200,7 +1279,7 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
                 "Contact your administrator for assistance"
             ],
             "suggestions": [
-                "Configure the Together.ai API key to enable AI analysis",
+                "Configure the OpenAI API key to enable AI analysis",
                 "Check the backend logs for more information",
                 "Try refreshing the page once the service is configured"
             ]
@@ -1228,61 +1307,56 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
         ]
     }
 
-    headers = {"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"}
-
-    data = {
-        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are an AI productivity coach analyzing a user's task completion statistics."
-            },
-            {
-                "role": "user",
-                "content": f"""
-                Here are the user's statistics:
-                {json.dumps(task_data, indent=2)}
-                
-                Please analyze these statistics and provide feedback in the following format:
-                {{
-                    "summary": "A brief 1-2 sentence summary of their overall progress",
-                    "insights": [
-                        "First insight about their productivity patterns",
-                        "Second insight about their task completion habits",
-                        "Third insight about their work patterns"
-                    ],
-                    "suggestions": [
-                        "First actionable suggestion for improvement",
-                        "Second actionable suggestion for improvement",
-                        "Third actionable suggestion for improvement"
-                    ]
-                }}
-                
-                Important guidelines:
-                - Keep the summary concise and encouraging
-                - Make insights specific to their actual statistics
-                - Make suggestions practical and actionable
-                - Focus on positive patterns and constructive improvements
-                - Use the exact format shown above
-                - Respond with ONLY the JSON, no explanations or other text
-                """
-            }
-        ],
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40,
-    }
-
     try:
-        logging.info("Sending request to Together.ai API")
-        response = requests.post(TOGETHER_API_URL, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-
-        # Extract the generated text from the response
-        generated_text = result["choices"][0]["message"]["content"].strip()
-        logging.info("Received response from Together.ai API")
-
+        # Initialize OpenAI LLM
+        logging.info("Initializing OpenAI LLM for statistics analysis")
+        llm = ChatOpenAI(
+            model="gpt-4o",
+            temperature=0.7,
+            max_tokens=1024,
+            openai_api_key=OPENAI_API_KEY
+        )
+        
+        # Prepare messages for OpenAI
+        messages = [
+            {"role": "system", "content": "You are an expert productivity analyst. Analyze user statistics and provide feedback in JSON format."},
+            {"role": "user", "content": f"""
+        Here are the user's statistics:
+        {json.dumps(task_data, indent=2)}
+        
+        Please analyze these statistics and provide feedback in the following format:
+        {{
+            "summary": "A brief 1-2 sentence summary of their overall progress",
+            "insights": [
+                "First insight about their productivity patterns",
+                "Second insight about their task completion habits",
+                "Third insight about their work patterns"
+            ],
+            "suggestions": [
+                "First actionable suggestion for improvement",
+                "Second actionable suggestion for improvement",
+                "Third actionable suggestion for improvement"
+            ]
+        }}
+        
+        Important guidelines:
+        - Keep the summary concise and encouraging
+        - Make insights specific to their actual statistics
+        - Make suggestions practical and actionable
+        - Focus on positive patterns and constructive improvements
+        - Use the exact format shown above
+        - Respond with ONLY the JSON, no explanations or other text
+        """}
+        ]
+        
+        # Call OpenAI API
+        logging.info("Calling OpenAI API for statistics analysis")
+        response = await llm.ainvoke(messages)
+        
+        # Extract content from the AIMessage
+        generated_text = response.content if hasattr(response, 'content') else str(response)
+        logging.info("Received response from OpenAI API")
+        
         # Parse the JSON from the generated text
         try:
             feedback_data = json.loads(generated_text)
@@ -1318,27 +1392,9 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
                 }
                 FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
                 return service_error_feedback
-
-    except requests.exceptions.Timeout:
-        logging.error("Together.ai API request timed out")
-        service_error_feedback = {
-            "summary": "AI Analysis Service Timeout",
-            "insights": [
-                "The AI service took too long to respond",
-                "The request timed out after 10 seconds",
-                "Please try again later"
-            ],
-            "suggestions": [
-                "Check your internet connection",
-                "Try again in a few minutes",
-                "Contact support if the issue persists"
-            ]
-        }
-        FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
-        return service_error_feedback
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Together.ai API request failed: {str(e)}")
+                
+    except Exception as e:
+        logging.error(f"OpenAI API request failed: {str(e)}")
         service_error_feedback = {
             "summary": "AI Analysis Service Error",
             "insights": [
