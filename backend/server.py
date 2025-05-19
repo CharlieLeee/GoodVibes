@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import time
 import asyncio
 
+from google import genai
 # LangChain imports
 from langchain_together import ChatTogether
 from langchain.memory import ConversationBufferMemory, ChatMessageHistory
@@ -34,12 +35,26 @@ mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
+from load_config import load_api_keys
+load_api_keys()
+
 # Together.ai API key
 TOGETHER_API_KEY = os.environ.get("TOGETHER_API_KEY")
 TOGETHER_API_URL = "https://api.together.xyz/v1/completions"
 
+# Gemini API key
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+gemini_model = "gemini-2.0-flash"
+
 # Add OpenAI API key
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+API_KEYS = {
+    "TOGETHER_API_KEY": TOGETHER_API_KEY,
+    "GEMINI_API_KEY": GEMINI_API_KEY,
+    "OPENAI_API_KEY": OPENAI_API_KEY
+}
 
 # Create the main app without a prefix
 app = FastAPI(title="AI Task Assistant API")
@@ -47,10 +62,12 @@ app = FastAPI(title="AI Task Assistant API")
 # Add CORS middleware before including the router
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Allow both localhost variations
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*", "Content-Type", "Authorization", "Accept"],
+    expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Configure logging
@@ -439,40 +456,51 @@ def get_agent_tools(user_id: str):
         )
     ]
 
-# Together.ai integration functions
-async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
-    """Use OpenAI to analyze a natural language task input and break it down"""
-
-    # Get current date information for context
-    current_date = datetime.utcnow()
-    current_date_str = current_date.strftime("%Y-%m-%d")
-    
-    # Check if OpenAI API key is available
-    if not OPENAI_API_KEY:
-        logging.error("OpenAI API key not found for task analysis")
-        # Return simple fallback response
-        return {
-            "title": text,
-            "subtasks": ["Review task details"],
-            "deadline": None,
-            "priority": "medium",
-            "emotional_support": "Let's start by clarifying what needs to be done."
-        }
-
+async def call_openai(text: str, messages: List[Dict[str, Any]], model: str = "gpt-4o", temperature: float = 0.7, max_tokens: int = 1024) -> Dict[str, Any]:
+    """Call OpenAI API"""
     # Initialize OpenAI model
     logging.info("Initializing OpenAI model for task analysis")
     llm = ChatOpenAI(
-        model="gpt-4o",
-        temperature=0.7, 
-        max_tokens=1024,
+        model=model,
+        temperature=temperature, 
+        max_tokens=max_tokens,
         openai_api_key=OPENAI_API_KEY
     )
+    try:
+        # Call OpenAI API
+        logging.info("Calling OpenAI API for task analysis")
+        response = await llm.ainvoke(messages)
+        
+        # Extract content from the AIMessage
+        generated_text = response.content if hasattr(response, 'content') else str(response)
+        logging.info("Received response from OpenAI API for task analysis")
+        return generated_text
+    except Exception as e:
+        logging.error(f"Error calling OpenAI API for task analysis: {str(e)}")
+        return None
     
+
+async def call_gemini(text: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Call Gemini API"""
+    response = gemini_client.models.generate_content(
+        model=gemini_model,
+        config=genai.types.GenerateContentConfig(system_instruction=messages[0]["content"]),
+        contents=messages[1]["content"]
+    )
+    return response.text
+
+
+async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
+    """Use AI to analyze a natural language task input and break it down"""
+
+    current_time = datetime.utcnow()
+    current_time_str = current_time.strftime("%Y-%m-%d-%H-%M")
+
     # Prepare the system and user messages
     messages = [
         {"role": "system", "content": "You are an AI assistant and an expert in time management that helps break down tasks into manageable subtasks and provides emotional support."},
         {"role": "user", "content": f"""
-        CURRENT DATE: {current_date_str}
+        CURRENT TIME: {current_time_str}
         
         USER INPUT: {text}
         
@@ -486,12 +514,12 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
         5. A brief encouraging message to help the user stay motivated
         
         Important instructions about dates and times:
-        - Today's date is {current_date_str}
+        - Now is {current_time_str}
         - All deadlines MUST include specific times in 24-hour format (HH:MM)
         - If a specific date is mentioned (like "June 15th"), use that date with a reasonable time (e.g., "2024-06-15T17:00")
         - If a day of week is mentioned (like "by Monday"), calculate the exact date based on today's date and use a reasonable time
         - If a relative time is mentioned (like "in 3 days"), calculate the date based on today and use a reasonable time
-        - For subtask deadlines, distribute them reasonably between {current_date_str} and the final deadline based on your expert knowledge
+        - For subtask deadlines, distribute them reasonably between {current_time_str} and the final deadline based on your expert knowledge
         - Always return dates in ISO format with time (YYYY-MM-DDTHH:MM)
         - If no deadline is mentioned, set deadline to null
         
@@ -517,52 +545,47 @@ async def analyze_task_with_llm(text: str) -> Dict[str, Any]:
         """}
     ]
 
-    try:
-        # Call OpenAI API
-        logging.info("Calling OpenAI API for task analysis")
-        response = await llm.ainvoke(messages)
-        
-        # Extract content from the AIMessage
-        generated_text = response.content if hasattr(response, 'content') else str(response)
-        logging.info("Received response from OpenAI API for task analysis")
-
+    response = None
+    if API_KEYS.get("OPENAI_API_KEY"):
+        response = await call_openai(text, messages)
+        if response is None:
+            logging.error("No response from OpenAI")
+            
+    
+    if response is None and API_KEYS.get("GEMINI_API_KEY"):
+        response = await call_gemini(text, messages)
+        if response is None:
+            logging.error("No response from Gemini")
+    
+    if response is not None:        
         # Parse the JSON from the generated text
         try:
-            task_data = json.loads(generated_text)
+            task_data = json.loads(response)
             logging.info(f"Successfully parsed task analysis JSON: {task_data.keys()}")
             return task_data
         except json.JSONDecodeError:
             # If the model didn't return valid JSON, try to extract JSON portion
             try:
                 # Look for JSON-like content between curly braces
-                json_start = generated_text.find("{")
-                json_end = generated_text.rfind("}") + 1
+                json_start = response.find("{")
+                json_end = response.rfind("}") + 1
                 if json_start >= 0 and json_end > json_start:
-                    json_str = generated_text[json_start:json_end]
+                    json_str = response[json_start:json_end]
                     task_data = json.loads(json_str)
                     logging.info(f"Successfully extracted and parsed task analysis JSON: {task_data.keys()}")
                     return task_data
             except:
-                logging.error(f"Failed to parse OpenAI response as JSON: {generated_text[:200]}...")
-                # Return a simple fallback response
-                return {
-                    "title": text,
-                    "subtasks": ["Review task details"],
-                    "deadline": None,
-                    "priority": "medium",
-                    "emotional_support": "Let's start by clarifying what needs to be done.",
-                }
-
-    except Exception as e:
-        logging.error(f"Error calling OpenAI API for task analysis: {str(e)}")
-        # Fallback response
-        return {
-            "title": text,
-            "subtasks": ["Review task details"],
-            "deadline": None,
-            "priority": "medium",
-            "emotional_support": "Let's start by clarifying what needs to be done.",
-        }
+                logging.error(f"Failed to parse AI response as JSON: {response[:200]}...")
+    else:
+        logging.error("No API key found for task analysis")
+    
+    return {
+        "title": text,
+        "subtasks": ["Review task details"],
+        "deadline": None,
+        "priority": "medium",
+        "emotional_support": "Let's start by clarifying what needs to be done."
+    }
 
 
 async def generate_emotional_support(task_title: str, deadline: Optional[datetime] = None) -> str:
@@ -830,7 +853,7 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
         raise HTTPException(status_code=404, detail="User not found")
     
     # Check if OpenAI API key is available, fallback to TogetherAI if available
-    if not OPENAI_API_KEY and not TOGETHER_API_KEY:
+    if not API_KEYS:
         logging.error("No LLM API keys available for task processing")
         # Create a simple task without AI processing
         task = Task(
@@ -843,7 +866,6 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
         await db.tasks.insert_one(task_dict)
         return task
     
-    # Use OpenAI by default, fallback to TogetherAI if OpenAI key not available
     logging.info(f"Processing task with text: {input_data.text}")
     
     # Process task with LLM
@@ -851,8 +873,8 @@ async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
     logging.info(f"Task analysis result: {json.dumps(task_analysis, default=str)[:200]}...")
     
     # Create deadline if provided
-    deadline = None
-    if task_analysis.get("deadline") and task_analysis["deadline"] != "not specified" and task_analysis["deadline"] != "null":
+    deadline = task_analysis.get("deadline")
+    if deadline is not None and deadline not in ["not specified", "null"]:
         try:
             # Try to parse the date - handle both full ISO and date-only formats
             date_str = task_analysis["deadline"]
@@ -1374,6 +1396,22 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
 
 async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) -> Dict[str, Any]:
     """Use OpenAI to analyze task statistics and provide emotionally supportive feedback"""
+    service_error_feedback = {
+                "summary": "AI Analysis Service Error",
+                "insights": [
+                    "The AI service returned an invalid response",
+                    "Please try again later",
+                    "Contact support if the issue persists"
+                ],
+                "suggestions": [
+                    "Try refreshing the page",
+                    "Check your internet connection",
+                    "Contact support if the issue persists"
+                ],
+                "motivation": "Remember that productivity tools are meant to serve you, not the other way around. Your worth is not measured by these statistics.",
+                "achievements": [],
+                "growth_areas": []
+            }
     
     # Check if we have cached feedback that's still valid
     cache_key = f"{stats.total_tasks}_{stats.completed_tasks}_{stats.total_subtasks}_{stats.completed_subtasks}"
@@ -1381,28 +1419,6 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
         cached_feedback, timestamp = FEEDBACK_CACHE[cache_key]
         if time.time() - timestamp < CACHE_DURATION:
             return cached_feedback
-
-    # If no OpenAI API key, return service unavailable feedback
-    if not OPENAI_API_KEY:
-        logging.error("OpenAI API key is not configured")
-        service_unavailable_feedback = {
-            "summary": "AI Analysis Service Unavailable",
-            "insights": [
-                "The AI analysis service is currently not configured",
-                "Please check your API key configuration",
-                "Contact your administrator for assistance"
-            ],
-            "suggestions": [
-                "Configure the OpenAI API key to enable AI analysis",
-                "Check the backend logs for more information",
-                "Try refreshing the page once the service is configured"
-            ],
-            "motivation": "Your productivity journey is unique. Even without AI analysis, you're making progress!",
-            "achievements": [],
-            "growth_areas": []
-        }
-        FEEDBACK_CACHE[cache_key] = (service_unavailable_feedback, time.time())
-        return service_unavailable_feedback
 
     # Prepare task data for analysis
     task_data = {
@@ -1423,21 +1439,9 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
             for task in stats.recent_completions
         ]
     }
-
-    try:
-        # Initialize OpenAI LLM
-        logging.info("Initializing OpenAI LLM for statistics analysis")
-        llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0.7,
-            max_tokens=1024,
-            openai_api_key=OPENAI_API_KEY
-        )
-        
-        # Prepare messages for OpenAI
-        messages = [
-            {"role": "system", "content": "You are an empathetic productivity coach and mental wellness expert who specializes in positive psychology. Your goal is to provide emotionally supportive analysis of productivity data while validating the user's efforts and encouraging sustainable growth. Always acknowledge the user's effort regardless of the numbers, recognizing that productivity is deeply personal and everyone's journey is unique."},
-            {"role": "user", "content": f"""
+    messages = [
+        {"role": "system", "content": "You are an empathetic productivity coach and mental wellness expert who specializes in positive psychology. Your goal is to provide emotionally supportive analysis of productivity data while validating the user's efforts and encouraging sustainable growth. Always acknowledge the user's effort regardless of the numbers, recognizing that productivity is deeply personal and everyone's journey is unique."},
+        {"role": "user", "content": f"""
         Here are the user's statistics:
         {json.dumps(task_data, indent=2)}
         
@@ -1484,74 +1488,51 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
         - Respond with ONLY the JSON, no explanations or other text
         """}
         ]
-        
-        # Call OpenAI API
+
+    if API_KEYS.get("OPENAI_API_KEY"):
         logging.info("Calling OpenAI API for statistics analysis")
-        response = await llm.ainvoke(messages)
+        response = await call_openai(task_data, messages, model="gpt-4o", temperature=0.7, max_tokens=1024)
+        if response is None:
+            logging.error("No response from OpenAI")
+    
+    if response is None and API_KEYS.get("GEMINI_API_KEY"):
+        logging.info("Calling Gemini API for statistics analysis")
+        response = await call_gemini(task_data, messages)
+        if response is None:
+            logging.error("No response from Gemini")
         
-        # Extract content from the AIMessage
-        generated_text = response.content if hasattr(response, 'content') else str(response)
-        logging.info("Received response from OpenAI API")
-        
-        # Parse the JSON from the generated text
-        try:
-            feedback_data = json.loads(generated_text)
-            # Cache the successful response
-            FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
-            return feedback_data
-        except json.JSONDecodeError:
-            # If the model didn't return valid JSON, try to extract JSON portion
-            try:
-                # Look for JSON-like content between curly braces
-                json_start = generated_text.find("{")
-                json_end = generated_text.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = generated_text[json_start:json_end]
-                    feedback_data = json.loads(json_str)
-                    # Cache the successful response
-                    FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
-                    return feedback_data
-            except:
-                logging.error(f"Failed to parse AI response as JSON: {generated_text}")
-                service_error_feedback = {
-                    "summary": "AI Analysis Service Error",
-                    "insights": [
-                        "The AI service returned an invalid response",
-                        "Please try again later",
-                        "Contact support if the issue persists"
-                    ],
-                    "suggestions": [
-                        "Try refreshing the page",
-                        "Check your internet connection",
-                        "Contact support if the issue persists"
-                    ],
-                    "motivation": "Remember that productivity tools are meant to serve you, not the other way around. Your worth is not measured by these statistics.",
-                    "achievements": [],
-                    "growth_areas": []
-                }
-                FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
-                return service_error_feedback
-                
-    except Exception as e:
-        logging.error(f"OpenAI API request failed: {str(e)}")
-        service_error_feedback = {
-            "summary": "AI Analysis Service Error",
-            "insights": [
-                "The AI service encountered an error",
-                f"Error details: {str(e)}",
-                "Please try again later"
-            ],
-            "suggestions": [
-                "Check your internet connection",
-                "Verify the AI service is running",
-                "Contact support if the issue persists"
-            ],
-            "motivation": "Even when technology fails, your productivity journey continues. Take this moment to reflect on what you've accomplished without an AI telling you.",
-            "achievements": [],
-            "growth_areas": []
-        }
+    if response is None:
+        logging.error("Failed to get response from OpenAI or Gemini")
         FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
         return service_error_feedback
+        
+    # Extract content from the AIMessage
+    generated_text = response.content if hasattr(response, 'content') else str(response)
+    logging.info("Received response from OpenAI API")
+        
+    # Parse the JSON from the generated text
+    try:
+        feedback_data = json.loads(generated_text)
+        # Cache the successful response
+        FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
+        return feedback_data
+    except json.JSONDecodeError:
+        # If the model didn't return valid JSON, try to extract JSON portion
+        try:
+            # Look for JSON-like content between curly braces
+            json_start = generated_text.find("{")
+            json_end = generated_text.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = generated_text[json_start:json_end]
+                feedback_data = json.loads(json_str)
+                # Cache the successful response
+                FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
+                return feedback_data
+        except:
+            logging.error(f"Failed to parse AI response as JSON: {generated_text}")
+            FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
+            return service_error_feedback
+                
 
 
 @api_router.get("/statistics/user/{user_id}/feedback", response_model=AIFeedback)
