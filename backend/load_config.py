@@ -32,12 +32,19 @@ def load_api_keys():
         with open(api_keys_file, 'r') as f:
             api_keys = json.load(f)
 
+        if not api_keys:
+            print("Warning: No API keys found in the API keys file")
+            return False
+
         # Set environment variables for string values
         for key, value in api_keys.items():
             if isinstance(value, str):
                 # Don't override existing environment variables
                 if key not in os.environ:
+                    print(f"{key} loaded")
                     os.environ[key] = value
+                else:
+                    print(f"{key} already exists in environment variables")
 
         return True
     except Exception as e:

@@ -38,10 +38,20 @@ def load_api_keys():
         with open(api_keys_file, 'r') as f:
             api_keys = json.load(f)
 
+        key_get = False
+
         # Check for the Together API key
-        if not api_keys.get("TOGETHER_API_KEY") or api_keys.get("TOGETHER_API_KEY") == "your_together_api_key_here":
-            print("Warning: TOGETHER_API_KEY not set in config/api_keys.json")
-            print("Please edit config/api_keys.json to add your actual Together API key")
+        if api_keys.get("TOGETHER_API_KEY") and api_keys.get("TOGETHER_API_KEY") != "your_together_api_key_here":
+            print("✅ TOGETHER_API_KEY found in config/api_keys.json")
+            key_get = True
+        
+        if api_keys.get("GEMINI_API_KEY") and api_keys.get("GEMINI_API_KEY") != "your_gemini_api_key_here":
+            print("✅ GEMINI_API_KEY found in config/api_keys.json")
+            key_get = True
+
+        if not key_get:
+            print("Warning: TOGETHER_API_KEY or GEMINI_API_KEY not set in config/api_keys.json")
+            print("Please edit config/api_keys.json to add your actual API keys")
             return False
 
         return api_keys
@@ -57,7 +67,6 @@ if __name__ == "__main__":
     """
     api_keys = load_api_keys()
     if api_keys:
-        print("✅ API keys loaded successfully")
         if len(sys.argv) > 1 and sys.argv[1] == "--export":
             # Export the keys as environment variables for the shell
             for key, value in api_keys.items():
