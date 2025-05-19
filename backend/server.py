@@ -168,6 +168,9 @@ class AIFeedback(BaseModel):
     summary: str
     insights: List[str]
     suggestions: List[str]
+    motivation: str
+    achievements: List[str]
+    growth_areas: List[str]
 
 
 # Add new Chat models
@@ -1370,7 +1373,7 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
         return {"response": "I'm sorry, I encountered an error. Please try again later."}
 
 async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) -> Dict[str, Any]:
-    """Use OpenAI to analyze task statistics and provide feedback"""
+    """Use OpenAI to analyze task statistics and provide emotionally supportive feedback"""
     
     # Check if we have cached feedback that's still valid
     cache_key = f"{stats.total_tasks}_{stats.completed_tasks}_{stats.total_subtasks}_{stats.completed_subtasks}"
@@ -1393,7 +1396,10 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
                 "Configure the OpenAI API key to enable AI analysis",
                 "Check the backend logs for more information",
                 "Try refreshing the page once the service is configured"
-            ]
+            ],
+            "motivation": "Your productivity journey is unique. Even without AI analysis, you're making progress!",
+            "achievements": [],
+            "growth_areas": []
         }
         FEEDBACK_CACHE[cache_key] = (service_unavailable_feedback, time.time())
         return service_unavailable_feedback
@@ -1430,32 +1436,51 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
         
         # Prepare messages for OpenAI
         messages = [
-            {"role": "system", "content": "You are an expert productivity analyst. Analyze user statistics and provide feedback in JSON format."},
+            {"role": "system", "content": "You are an empathetic productivity coach and mental wellness expert who specializes in positive psychology. Your goal is to provide emotionally supportive analysis of productivity data while validating the user's efforts and encouraging sustainable growth. Always acknowledge the user's effort regardless of the numbers, recognizing that productivity is deeply personal and everyone's journey is unique."},
             {"role": "user", "content": f"""
         Here are the user's statistics:
         {json.dumps(task_data, indent=2)}
         
-        Please analyze these statistics and provide feedback in the following format:
+        Please analyze these statistics and provide emotionally supportive feedback in the following format:
         {{
-            "summary": "A brief 1-2 sentence summary of their overall progress",
+            "summary": "A warm, encouraging 2-3 sentence summary of their overall progress that acknowledges both achievements and challenges",
+            
             "insights": [
-                "First insight about their productivity patterns",
-                "Second insight about their task completion habits",
-                "Third insight about their work patterns"
+                "First insight about their productivity patterns, phrased in a supportive tone",
+                "Second insight about their task completion habits, with positive framing",
+                "Third insight about their work patterns, highlighting strengths"
             ],
+            
             "suggestions": [
-                "First actionable suggestion for improvement",
-                "Second actionable suggestion for improvement",
-                "Third actionable suggestion for improvement"
+                "First actionable, gentle suggestion for improvement",
+                "Second actionable suggestion that builds on existing strengths",
+                "Third actionable suggestion with emotional benefit mentioned"
+            ],
+            
+            "motivation": "A heartfelt motivational message that acknowledges their effort and encourages them to keep going",
+            
+            "achievements": [
+                "An achievement they've made based on the data, even if small",
+                "Another achievement that deserves recognition",
+                "A pattern of success worth celebrating"
+            ],
+            
+            "growth_areas": [
+                "A growth opportunity framed in a positive, non-judgmental way",
+                "Another area for development presented as an exciting possibility"
             ]
         }}
         
         Important guidelines:
-        - Keep the summary concise and encouraging
-        - Make insights specific to their actual statistics
-        - Make suggestions practical and actionable
-        - Focus on positive patterns and constructive improvements
-        - Use the exact format shown above
+        - Use a warm, supportive, and empathetic tone throughout
+        - Focus on effort and progress rather than just outcomes
+        - Acknowledge both achievements and areas for growth
+        - Emphasize that productivity is personal and everyone works differently
+        - Validate their efforts regardless of completion rates
+        - Offer concrete but gentle suggestions that consider emotional wellbeing
+        - Identify specific achievements to celebrate, no matter how small
+        - Frame growth areas as exciting opportunities rather than deficiencies
+        - Inject positivity, but be authentic rather than overly cheerful
         - Respond with ONLY the JSON, no explanations or other text
         """}
         ]
@@ -1499,7 +1524,10 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
                         "Try refreshing the page",
                         "Check your internet connection",
                         "Contact support if the issue persists"
-                    ]
+                    ],
+                    "motivation": "Remember that productivity tools are meant to serve you, not the other way around. Your worth is not measured by these statistics.",
+                    "achievements": [],
+                    "growth_areas": []
                 }
                 FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
                 return service_error_feedback
@@ -1517,7 +1545,10 @@ async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) 
                 "Check your internet connection",
                 "Verify the AI service is running",
                 "Contact support if the issue persists"
-            ]
+            ],
+            "motivation": "Even when technology fails, your productivity journey continues. Take this moment to reflect on what you've accomplished without an AI telling you.",
+            "achievements": [],
+            "growth_areas": []
         }
         FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
         return service_error_feedback
