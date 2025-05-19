@@ -78,6 +78,7 @@ class Subtask(BaseModel):
     deadline: Optional[datetime] = None
     order: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     def __init__(self, **data):
         # If title is not provided or is None, use description as title
@@ -735,6 +736,9 @@ async def update_subtask(task_id: str, subtask_id: str, subtask_update: SubtaskU
     if update_data:
         for key, value in update_data.items():
             task["subtasks"][subtask_index][key] = value
+        
+        # Add updated_at timestamp to the subtask
+        task["subtasks"][subtask_index]["updated_at"] = datetime.utcnow()
 
         # If all subtasks are completed, mark task as completed
         all_completed = all(subtask.get("completed", False) for subtask in task["subtasks"])
@@ -942,14 +946,22 @@ async def get_user_statistics(user_id: str):
         all_subtasks.extend(task.subtasks)
     
     total_subtasks = len(all_subtasks)
+    # Count subtasks that are explicitly marked as completed
     completed_subtasks = sum(1 for subtask in all_subtasks if subtask.completed)
     subtask_completion_rate = (completed_subtasks / total_subtasks * 100) if total_subtasks > 0 else 0
     
+    # Recent subtask completions (last 7 days)
+    recent_subtask_completions = sum(
+        1 for subtask in all_subtasks 
+        if subtask.completed and hasattr(subtask, 'updated_at') and 
+        subtask.updated_at and subtask.updated_at >= one_week_ago
+    )
+    
     # Subtasks by priority (using parent task's priority)
     subtasks_by_priority = {
-        "high": sum(len([st for st in task.subtasks if task.priority == "high"]) for task in tasks),
-        "medium": sum(len([st for st in task.subtasks if task.priority == "medium"]) for task in tasks),
-        "low": sum(len([st for st in task.subtasks if task.priority == "low"]) for task in tasks)
+        "high": sum(1 for subtask in all_subtasks for task in tasks if task.id == subtask.task_id and task.priority == "high"),
+        "medium": sum(1 for subtask in all_subtasks for task in tasks if task.id == subtask.task_id and task.priority == "medium"),
+        "low": sum(1 for subtask in all_subtasks for task in tasks if task.id == subtask.task_id and task.priority == "low")
     }
     
     # Subtasks by status
