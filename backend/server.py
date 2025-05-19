@@ -14,16 +14,20 @@ import uuid
 from datetime import datetime, timedelta
 import time
 import asyncio
+from fastapi.responses import JSONResponse
+import re
+from fastapi import Request
 
 # LangChain imports
 from langchain_together import ChatTogether
-from langchain.memory import ConversationBufferMemory, ChatMessageHistory
+from langchain.memory import ConversationBufferMemory
+from langchain_community.chat_message_histories.in_memory import ChatMessageHistory
 from langchain.chains import ConversationChain
 from langchain.schema import SystemMessage, HumanMessage, AIMessage
 from langchain.tools import Tool, StructuredTool
 from langchain.agents import AgentExecutor, AgentType, initialize_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, HumanMessagePromptTemplate
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 
 # Root directory and environment loading
 ROOT_DIR = Path(__file__).parent
@@ -138,8 +142,10 @@ class SubtaskUpdate(BaseModel):
 
 
 class NaturalLanguageTaskInput(BaseModel):
+    """Input for natural language task processing"""
     text: str
     user_id: str
+    task_data: Optional[Dict[str, Any]] = None
 
 
 class EmotionalSupportType(BaseModel):
@@ -175,6 +181,12 @@ class AIFeedback(BaseModel):
 
 # Add new Chat models
 class ChatMessage(BaseModel):
+    user_id: str
+    role: str  # 'user' or 'assistant'
+    content: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class ChatMessageInput(BaseModel):
     message: str
     user_id: str
 
@@ -182,7 +194,7 @@ class ChatResponse(BaseModel):
     response: str
 
 # Chat memory storage
-chat_histories = {}
+chat_messages = []
 
 # Store pending tasks
 pending_tasks = []
@@ -823,113 +835,162 @@ async def delete_subtask(task_id: str, subtask_id: str):
 # Natural language task processing
 @api_router.post("/process-task", response_model=Task)
 async def process_natural_language_task(input_data: NaturalLanguageTaskInput):
-    # Verify user exists
-    user = await db.users.find_one({"id": input_data.user_id})
-    if not user:
-        logging.error(f"User not found when processing task: {input_data.user_id}")
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Check if OpenAI API key is available, fallback to TogetherAI if available
-    if not OPENAI_API_KEY and not TOGETHER_API_KEY:
-        logging.error("No LLM API keys available for task processing")
-        # Create a simple task without AI processing
-        task = Task(
-            user_id=input_data.user_id,
-            title=input_data.text,
-            description=input_data.text,
-            priority="medium"
-        )
-        task_dict = task.dict()
-        await db.tasks.insert_one(task_dict)
-        return task
-    
-    # Use OpenAI by default, fallback to TogetherAI if OpenAI key not available
-    logging.info(f"Processing task with text: {input_data.text}")
-    
-    # Process task with LLM
-    task_analysis = await analyze_task_with_llm(input_data.text)
-    logging.info(f"Task analysis result: {json.dumps(task_analysis, default=str)[:200]}...")
-    
-    # Create deadline if provided
-    deadline = None
-    if task_analysis.get("deadline") and task_analysis["deadline"] != "not specified" and task_analysis["deadline"] != "null":
-        try:
-            # Try to parse the date - handle both full ISO and date-only formats
-            date_str = task_analysis["deadline"]
-            logging.info(f"Parsing deadline: {date_str}")
-            if 'T' in date_str:
-                deadline = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            else:
-                # For YYYY-MM-DD format, add time (end of day)
-                deadline = datetime.fromisoformat(f"{date_str}T23:59:59")
-            logging.info(f"Parsed deadline: {deadline}")
-        except Exception as e:
-            # If deadline parsing fails, log the error
-            logging.error(f"Failed to parse deadline: {task_analysis['deadline']} - Error: {str(e)}")
-    
-    # Create task
-    task = Task(
-        user_id=input_data.user_id,
-        title=task_analysis.get("title", input_data.text),
-        description=input_data.text,
-        deadline=deadline,
-        priority=task_analysis.get("priority", "medium"),
-        emotional_support=task_analysis.get("emotional_support", "")
-    )
-    
-    # Create subtasks
-    subtasks_data = task_analysis.get("subtasks", [])
-    logging.info(f"Creating {len(subtasks_data)} subtasks")
-    
-    for i, subtask_item in enumerate(subtasks_data):
-        try:
-            # Handle both new format (object with description & deadline) and old format (string only)
-            if isinstance(subtask_item, dict):
-                subtask_desc = subtask_item.get("description", "")
-                logging.info(f"Subtask {i+1} is a dictionary: {subtask_item}")
-                
-                # Process subtask deadline if provided
+    """Process a natural language task description and create a structured task"""
+    try:
+        # Verify user exists
+        user = await db.users.find_one({"id": input_data.user_id})
+        if not user:
+            logging.error(f"User not found when processing task: {input_data.user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Check if we have structured task_data in the input
+        task_data = getattr(input_data, "task_data", None)
+        
+        # If we have structured task data, use it directly
+        if task_data:
+            logging.info(f"Creating task from structured data: {task_data}")
+            
+            task_title = task_data.get("title", "")
+            task_description = task_data.get("description", "")
+            task_priority = task_data.get("priority", "medium")
+            task_deadline_str = task_data.get("deadline")
+            task_subtasks = task_data.get("subtasks", [])
+            
+            # Create the task
+            task = Task(
+                user_id=input_data.user_id,
+                title=task_title,
+                description=task_description or "",
+                priority=task_priority,
+                deadline=task_deadline_str,
+                completed=False
+            )
+            
+            # Process subtasks if available
+            for i, subtask_item in enumerate(task_subtasks):
                 subtask_deadline = None
                 if subtask_item.get("deadline"):
-                    try:
-                        subtask_date_str = subtask_item["deadline"]
-                        logging.info(f"Parsing subtask deadline: {subtask_date_str}")
-                        if 'T' in subtask_date_str:
-                            subtask_deadline = datetime.fromisoformat(subtask_date_str.replace("Z", "+00:00"))
-                        else:
-                            # For YYYY-MM-DD format, add time (end of day)
-                            subtask_deadline = datetime.fromisoformat(f"{subtask_date_str}T23:59:59")
-                        logging.info(f"Parsed subtask deadline: {subtask_deadline}")
-                    except Exception as e:
-                        # If parsing fails, don't set a deadline
-                        logging.error(f"Failed to parse subtask deadline: {subtask_item['deadline']} - Error: {str(e)}")
-            else:
-                # Handle legacy format (plain string)
-                subtask_desc = str(subtask_item)
-                subtask_deadline = None
-                logging.info(f"Subtask {i+1} is a string: {subtask_desc}")
-                
-            # Set title based on item type - using .get only when it's a dictionary
-            subtask_title = subtask_item.get('title') if isinstance(subtask_item, dict) else subtask_desc
+                    subtask_deadline = parse_deadline(subtask_item["deadline"])
+                    
+                subtask = Subtask(
+                    task_id=task.id,
+                    title=subtask_item.get("description", "")[:50],  # Use start as title
+                    description=subtask_item.get("description", ""),
+                    priority=subtask_item.get("priority", "medium"),
+                    deadline=subtask_deadline,
+                    order=i
+                )
+                task.subtasks.append(subtask)
             
-            subtask = Subtask(
-                task_id=task.id,
-                title=subtask_title,
-                description=subtask_desc,
-                deadline=subtask_deadline,
-                order=i
+            # Save the task
+            task_dict = task.dict()
+            await db.tasks.insert_one(task_dict)
+            return task
+        
+        # If no structured data, fall back to AI processing
+        if not OPENAI_API_KEY and not TOGETHER_API_KEY:
+            logging.error("No LLM API keys available for task processing")
+            # Create a simple task without AI processing
+            task = Task(
+                user_id=input_data.user_id,
+                title=input_data.text,
+                description=input_data.text,
+                priority="medium"
             )
-            task.subtasks.append(subtask)
-            logging.info(f"Added subtask {i+1}: {subtask_title}")
-        except Exception as e:
-            logging.error(f"Error creating subtask {i+1}: {str(e)}")
-    
-    # Insert task
-    task_dict = task.dict()
-    await db.tasks.insert_one(task_dict)
-    logging.info(f"Task created successfully with ID: {task.id}")
-    return task
+            task_dict = task.dict()
+            await db.tasks.insert_one(task_dict)
+            return task
+            
+        # Process task with LLM
+        task_analysis = await analyze_task_with_llm(input_data.text)
+        logging.info(f"Task analysis result: {json.dumps(task_analysis, default=str)[:200]}...")
+        
+        # Create deadline if provided
+        deadline = None
+        if task_analysis.get("deadline") and task_analysis["deadline"] != "not specified" and task_analysis["deadline"] != "null":
+            try:
+                deadline = parse_deadline(task_analysis["deadline"])
+            except Exception as e:
+                logging.error(f"Failed to parse deadline: {task_analysis['deadline']} - Error: {str(e)}")
+        
+        # Create task
+        task = Task(
+            user_id=input_data.user_id,
+            title=task_analysis.get("title", input_data.text),
+            description=input_data.text,
+            deadline=deadline,
+            priority=task_analysis.get("priority", "medium"),
+            emotional_support=task_analysis.get("emotional_support", "")
+        )
+        
+        # Create subtasks
+        subtasks_data = task_analysis.get("subtasks", [])
+        logging.info(f"Creating {len(subtasks_data)} subtasks")
+        
+        for i, subtask_item in enumerate(subtasks_data):
+            try:
+                # Handle both new format (object with description & deadline) and old format (string only)
+                if isinstance(subtask_item, dict):
+                    subtask_desc = subtask_item.get("description", "")
+                    logging.info(f"Subtask {i+1} is a dictionary: {subtask_item}")
+                    
+                    # Process subtask deadline if provided
+                    subtask_deadline = None
+                    if subtask_item.get("deadline"):
+                        try:
+                            subtask_deadline = parse_deadline(subtask_item["deadline"])
+                        except Exception as e:
+                            logging.error(f"Failed to parse subtask deadline: {subtask_item['deadline']} - Error: {str(e)}")
+                else:
+                    # Handle legacy format (plain string)
+                    subtask_desc = str(subtask_item)
+                    subtask_deadline = None
+                    logging.info(f"Subtask {i+1} is a string: {subtask_desc}")
+                    
+                # Set title based on item type - using .get only when it's a dictionary
+                subtask_title = subtask_item.get('title') if isinstance(subtask_item, dict) else subtask_desc
+                
+                subtask = Subtask(
+                    task_id=task.id,
+                    title=subtask_title[:50],  # Use start as title
+                    description=subtask_desc,
+                    deadline=subtask_deadline,
+                    order=i
+                )
+                task.subtasks.append(subtask)
+                logging.info(f"Added subtask {i+1}: {subtask_title}")
+            except Exception as e:
+                logging.error(f"Error creating subtask {i+1}: {str(e)}")
+        
+        # Insert task
+        task_dict = task.dict()
+        await db.tasks.insert_one(task_dict)
+        logging.info(f"Task created successfully with ID: {task.id}")
+        return task
+        
+    except Exception as e:
+        logging.error(f"Error in process_natural_language_task: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to process task: {str(e)}"
+        )
 
+def parse_deadline(date_str):
+    """Parse deadline string into datetime object"""
+    if not date_str or date_str == "null" or date_str == "not specified":
+        return None
+        
+    try:
+        logging.info(f"Parsing deadline: {date_str}")
+        if 'T' in date_str:
+            # ISO format with time
+            return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        else:
+            # YYYY-MM-DD format, add time (end of day)
+            return datetime.fromisoformat(f"{date_str}T23:59:59")
+    except Exception as e:
+        logging.error(f"Failed to parse deadline: {date_str} - Error: {str(e)}")
+        return None
 
 # Emotional support API
 @api_router.post("/emotional-support", response_model=EmotionalSupportType)
@@ -1214,20 +1275,22 @@ async def _handle_create_task(query: str, user_id: str) -> str:
 
 # Chat API endpoint
 @api_router.post("/chat", response_model=ChatResponse)
-async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundTasks, provider: Optional[str] = None):
-    # Verify user exists
-    user = await db.users.find_one({"id": chat_message.user_id})
-    if not user:
-        logging.error(f"User not found with ID: {chat_message.user_id}")
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Determine provider: default to OpenAI if key is set, else TogetherAI
-    selected_provider = provider or "openai"
-    logging.info(f"Using LLM provider: {selected_provider}")
-    logging.info(f"Message content: {chat_message.message}")
-    logging.info(f"User ID: {chat_message.user_id}")
-    
+async def chat_with_llm(chat_message: ChatMessageInput, background_tasks: BackgroundTasks, provider: Optional[str] = None):
+    """Chat with an AI assistant"""
     try:
+        # Verify user exists
+        user = await db.users.find_one({"id": chat_message.user_id})
+        if not user:
+            logging.error(f"User not found with ID: {chat_message.user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Check if OpenAI API is available
+        if not OPENAI_API_KEY:
+            return {"response": "Sorry, I'm not able to process chat requests right now. The AI model is unavailable."}
+
+        # Save the user message to chat history
+        user_message = {"role": "user", "content": chat_message.message, "timestamp": datetime.utcnow()}
+        
         # Get or create chat history from database
         db_chat_history = await db.chat_history.find_one({"user_id": chat_message.user_id})
         if not db_chat_history:
@@ -1238,118 +1301,60 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
                 "updated_at": datetime.utcnow()
             }
         
-        # Create in-memory chat history for LangChain
-        chat_memory = ChatMessageHistory()
-        for msg in db_chat_history.get("messages", []):
-            if msg["role"] == "user":
-                chat_memory.add_user_message(msg["content"])
-            else:
-                chat_memory.add_ai_message(msg["content"])
-        
-        # Create conversation memory with the chat history
-        memory = ConversationBufferMemory(
-            chat_memory=chat_memory,
-            memory_key="chat_history",
-            return_messages=True
-        )
-        
-        # Initialize the appropriate LLM based on provider
-        if selected_provider == "openai":
-            if not OPENAI_API_KEY:
-                logging.error("OpenAI API key not found in environment variables")
-                return {"response": "OpenAI chat functionality is unavailable. Please set up your OPENAI_API_KEY."}
-            
-            logging.info("Initializing OpenAI LLM")
-            llm = ChatOpenAI(
-                model="gpt-4o",
-                temperature=0.7,
-                max_tokens=1024,
-                openai_api_key=OPENAI_API_KEY
-            )
-            logging.info("OpenAI LLM initialized successfully")
-        elif selected_provider == "togetherai":
-            if not TOGETHER_API_KEY:
-                logging.error("TogetherAI API key not found in environment variables")
-                return {"response": "TogetherAI chat functionality is unavailable. Please set up your TOGETHER_API_KEY."}
-            
-            logging.info("Initializing TogetherAI LLM")
-            llm = ChatTogether(
-                model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
-                temperature=0.7,
-                max_tokens=1024,
-                together_api_key=TOGETHER_API_KEY
-            )
-            logging.info("TogetherAI LLM initialized successfully")
-        else:
-            logging.error(f"Unknown provider: {selected_provider}")
-            return {"response": f"Unknown provider: {selected_provider}. Please use 'openai' or 'togetherai'."}
-        
-        # Get all tools for the agent
-        tools = get_agent_tools(chat_message.user_id)
-        
-        # Create system message to guide the agent
-        current_date = datetime.utcnow().strftime("%Y-%m-%d")
-        system_message = (
-            "You are an AI assistant that helps users manage their tasks and stay organized. "
-            "You can help break down complex tasks into manageable steps, provide encouragement, "
-            "and answer questions about productivity and time management.\n\n"
-            "IMPORTANT: You have two powerful tools available:\n\n"
-            "1. create_task: Use this to create a simple task with title, description, priority, and deadline.\n"
-            "2. decompose_task: Use this for complex tasks that should be broken down into subtasks. "
-            "This tool will analyze the task, create a main task, and add appropriate subtasks automatically.\n\n"
-            f"The current date is {current_date}. Be helpful, clear, and concise. "
-            "When a user describes something they need to do, consider whether it's a simple task "
-            "or a complex project that needs to be broken down into steps.\n\n"
-            "FORMATTING: Format your responses using Markdown:\n"
-            "- Use **bold** for emphasis\n"
-            "- Use *italic* for subtle emphasis\n"
-            "- Use # for headings (# Main Heading, ## Sub Heading)\n"
-            "- Use - or * for bullet points\n"
-            "- Use 1. 2. 3. for numbered lists\n"
-            "- Use `code` for technical terms\n"
-            "- Use ```code blocks``` for multiple lines of code or examples\n"
-            "- Use [link text](URL) for links\n\n"
-            "When you provide an answer to the user, make sure it is clear and concise. Do not generate very long responses."
-        )
-        
-        # Use the initialize_agent approach
-        logging.info("Initializing agent chain")
-        agent_chain = initialize_agent(
-            tools,
-            llm,
-            agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
-            verbose=True,
-            memory=memory,
-            handle_parsing_errors=True,
-            max_iterations=3,
-            agent_kwargs={"system_message": system_message}
-        )
-        logging.info("Agent chain initialized successfully")
-        
-        # Add the user message to database chat history
-        user_message = {"role": "user", "content": chat_message.message, "timestamp": datetime.utcnow()}
         if "messages" not in db_chat_history:
             db_chat_history["messages"] = []
+            
         db_chat_history["messages"].append(user_message)
         db_chat_history["updated_at"] = datetime.utcnow()
         
-        # Add to in-memory chat history for LangChain
-        chat_memory.add_user_message(chat_message.message)
-        logging.info("User message added to chat history")
+        # Check if this is a task creation request
+        is_task_request = detect_task_creation_intent(chat_message.message)
         
-        # Get response from the agent
+        # Get chat history for context (last 10 messages)
+        history_messages = db_chat_history["messages"][-10:] if len(db_chat_history["messages"]) > 0 else []
+        
+        messages = [
+            {"role": "system", "content": """You are a helpful assistant for a productivity app called GoodVibes. 
+            Your goal is to help users be more productive, organized, and motivated.
+            
+            If the user is asking you to create a task, identify the main task and its subtasks, priority, and deadline.
+            
+            For task creation:
+            1. Parse the user's request to identify the main task, subtasks, priority, and deadline
+            2. Respond conversationally, but include a structured task preview inside a code block with this exact format:
+            ```task-preview
+            {"title": "Main task title", "priority": "low|medium|high", "deadline": "ISO date string or null", "subtasks": [{"description": "Subtask 1", "deadline": "ISO date string or null"}, ...]}
+            ```
+            3. Ask clarifying questions if task information is ambiguous or incomplete
+            
+            If they ask for productivity advice or help with other matters, respond helpfully without including a task preview.
+            
+            Use a warm, supportive, and empathetic tone throughout."""}
+        ]
+        
+        # Add history
+        for msg in history_messages:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Add current message
+        messages.append({"role": "user", "content": chat_message.message})
+        
+        # Initialize the appropriate LLM based on provider
+        if not OPENAI_API_KEY:
+            logging.error("OpenAI API key not found in environment variables")
+            return {"response": "OpenAI chat functionality is unavailable. Please set up your OPENAI_API_KEY."}
+        
+        logging.info("Calling OpenAI Chat API")
         try:
-            logging.info("Invoking agent chain")
-            response = await agent_chain.ainvoke({"input": chat_message.message})
-            ai_response = response.get("output", "I'm sorry, I couldn't process your request.")
-            logging.info("Agent chain response received successfully")
-            logging.info(f"Response content: {ai_response}")
-        except Exception as agent_error:
-            logging.error(f"Agent error: {str(agent_error)}")
-            ai_response = "I encountered an error while processing your request. Please try again with a simpler question or task."
+            response = await get_openai_chat_response(messages)
+            ai_response = response["choices"][0]["message"]["content"]
+            logging.info("OpenAI response received successfully")
+        except Exception as e:
+            logging.error(f"OpenAI API error: {str(e)}")
+            return {"response": "I encountered an error while processing your request. Please try again."}
         
-        # Add the AI response to database chat history
-        ai_message = {"role": "ai", "content": ai_response, "timestamp": datetime.utcnow()}
+        # Save the assistant's response to chat history
+        ai_message = {"role": "assistant", "content": ai_response, "timestamp": datetime.utcnow()}
         db_chat_history["messages"].append(ai_message)
         db_chat_history["updated_at"] = datetime.utcnow()
         
@@ -1360,236 +1365,180 @@ async def chat_with_llm(chat_message: ChatMessage, background_tasks: BackgroundT
             upsert=True
         )
         
-        # Add to in-memory chat history for LangChain
-        chat_memory.add_ai_message(ai_response)
-        logging.info("AI response added to chat history and saved to database")
-        
-        # Process pending tasks immediately
-        await process_pending_tasks()
+        # Process pending tasks if needed
+        background_tasks.add_task(process_pending_tasks)
         
         return {"response": ai_response}
     except Exception as e:
         logging.error(f"Error in chat endpoint: {str(e)}")
         return {"response": "I'm sorry, I encountered an error. Please try again later."}
 
-async def analyze_statistics_with_llm(stats: TaskStatistics, tasks: List[Task]) -> Dict[str, Any]:
-    """Use OpenAI to analyze task statistics and provide emotionally supportive feedback"""
+def detect_task_creation_intent(message: str) -> bool:
+    """Detect if the user message likely contains a task creation intent"""
+    task_keywords = [
+        "create a task", "add a task", "new task", "make a task",
+        "schedule", "remind me", "to-do", "todo", "to do",
+        "need to", "have to", "must", "should", "plan", "organize",
+        "set up", "arrange", "prepare"
+    ]
     
-    # Check if we have cached feedback that's still valid
-    cache_key = f"{stats.total_tasks}_{stats.completed_tasks}_{stats.total_subtasks}_{stats.completed_subtasks}"
-    if cache_key in FEEDBACK_CACHE:
-        cached_feedback, timestamp = FEEDBACK_CACHE[cache_key]
-        if time.time() - timestamp < CACHE_DURATION:
-            return cached_feedback
+    message_lower = message.lower()
+    
+    # Check for common task creation phrases
+    for keyword in task_keywords:
+        if keyword in message_lower:
+            return True
+    
+    # Check for imperative sentences or action items
+    sentences = message.split('.')
+    for sentence in sentences:
+        words = sentence.strip().split()
+        if words and words[0].endswith('ing'):
+            return True
+    
+    return False
 
-    # If no OpenAI API key, return service unavailable feedback
-    if not OPENAI_API_KEY:
-        logging.error("OpenAI API key is not configured")
-        service_unavailable_feedback = {
-            "summary": "AI Analysis Service Unavailable",
-            "insights": [
-                "The AI analysis service is currently not configured",
-                "Please check your API key configuration",
-                "Contact your administrator for assistance"
-            ],
-            "suggestions": [
-                "Configure the OpenAI API key to enable AI analysis",
-                "Check the backend logs for more information",
-                "Try refreshing the page once the service is configured"
-            ],
-            "motivation": "Your productivity journey is unique. Even without AI analysis, you're making progress!",
-            "achievements": [],
-            "growth_areas": []
-        }
-        FEEDBACK_CACHE[cache_key] = (service_unavailable_feedback, time.time())
-        return service_unavailable_feedback
 
-    # Prepare task data for analysis
-    task_data = {
-        "total_tasks": stats.total_tasks,
-        "completed_tasks": stats.completed_tasks,
-        "completion_rate": stats.completion_rate,
-        "tasks_by_priority": stats.tasks_by_priority,
-        "tasks_by_status": stats.tasks_by_status,
-        "total_subtasks": stats.total_subtasks,
-        "completed_subtasks": stats.completed_subtasks,
-        "subtask_completion_rate": stats.subtask_completion_rate,
-        "recent_completions": [
-            {
-                "title": task.title,
-                "completed_at": task.updated_at.isoformat() if task.completed else None,
-                "priority": task.priority
-            }
-            for task in stats.recent_completions
-        ]
-    }
-
+@app.post("/api/process-task")
+async def process_task(req: Request):
     try:
-        # Initialize OpenAI LLM
-        logging.info("Initializing OpenAI LLM for statistics analysis")
-        llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0.7,
-            max_tokens=1024,
-            openai_api_key=OPENAI_API_KEY
+        data = await req.json()
+        text = data.get("text", "")
+        user_id = data.get("user_id")
+        task_data = data.get("task_data")  # New parameter for structured task data
+        
+        # If we have structured task data, use it directly
+        if task_data:
+            task_title = task_data.get("title", "")
+            task_description = task_data.get("description", "")
+            task_priority = task_data.get("priority", "medium")
+            task_deadline_str = task_data.get("deadline")
+            task_subtasks = task_data.get("subtasks", [])
+            
+            # Create the task
+            task = Task(
+                user_id=user_id,
+                title=task_title,
+                description=task_description or "",
+                priority=task_priority,
+                deadline=task_deadline_str,
+                completed=False
+            )
+            
+            # Process subtasks if available
+            for subtask_item in task_subtasks:
+                subtask = Subtask(
+                    task_id=task.id,
+                    description=subtask_item.get("description", ""),
+                    priority=subtask_item.get("priority", "medium"),
+                    deadline=subtask_item.get("deadline")
+                )
+                task.subtasks.append(subtask)
+                
+            # Generate emotional support message
+            task.emotional_support = await generate_emotional_support(task_title)
+            
+            # Save the task to MongoDB
+            task_dict = task.dict()
+            await db.tasks.insert_one(task_dict)
+            return task
+        
+        # Otherwise, fall back to the AI processing flow
+        
+        if not OPENAI_API_KEY:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "OpenAI API key not configured"}
+            )
+
+        # Extract task information using OpenAI
+        messages = [
+            {"role": "system", "content": """You are a helpful AI assistant for a productivity app. 
+            Your job is to extract structured task information from user input.
+            Response must be valid JSON with the following structure:
+            {
+                "title": "Main task title",
+                "description": "Detailed description (optional)",
+                "priority": "low|medium|high",
+                "deadline": "ISO date string or null",
+                "subtasks": [
+                    {
+                        "description": "Subtask description",
+                        "priority": "low|medium|high",
+                        "deadline": "ISO date string or null"
+                    }
+                ]
+            }
+            
+            Extract dates smartly - if user says "tomorrow", convert to actual date.
+            If no specific priority is mentioned, use "medium" as default.
+            If no deadline is specified, set to null.
+            Parse the input carefully and create a logical task structure."""},
+            {"role": "user", "content": text}
+        ]
+
+        response = await get_openai_chat_response(messages)
+        task_info_str = response["choices"][0]["message"]["content"]
+        
+        # Parse JSON response
+        try:
+            task_info = json.loads(task_info_str)
+        except json.JSONDecodeError:
+            # If response isn't valid JSON, try to extract JSON from the response
+            match = re.search(r'```json(.*?)```', task_info_str, re.DOTALL)
+            if match:
+                try:
+                    task_info = json.loads(match.group(1).strip())
+                except:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": "Failed to parse AI response as JSON"}
+                    )
+            else:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Failed to parse AI response as JSON"}
+                )
+        
+        task_title = task_info.get("title", "")
+        task_description = task_info.get("description", "")
+        task_priority = task_info.get("priority", "medium")
+        task_deadline_str = task_info.get("deadline")
+        task_subtasks = task_info.get("subtasks", [])
+        
+        # Create the task
+        task = Task(
+            user_id=user_id,
+            title=task_title,
+            description=task_description,
+            priority=task_priority,
+            deadline=task_deadline_str,
+            completed=False
         )
         
-        # Prepare messages for OpenAI
-        messages = [
-            {"role": "system", "content": "You are an empathetic productivity coach and mental wellness expert who specializes in positive psychology. Your goal is to provide emotionally supportive analysis of productivity data while validating the user's efforts and encouraging sustainable growth. Always acknowledge the user's effort regardless of the numbers, recognizing that productivity is deeply personal and everyone's journey is unique."},
-            {"role": "user", "content": f"""
-        Here are the user's statistics:
-        {json.dumps(task_data, indent=2)}
-        
-        Please analyze these statistics and provide emotionally supportive feedback in the following format:
-        {{
-            "summary": "A warm, encouraging 2-3 sentence summary of their overall progress that acknowledges both achievements and challenges",
+        # Process subtasks
+        for subtask_item in task_subtasks:
+            subtask = Subtask(
+                task_id=task.id,
+                description=subtask_item.get("description", ""),
+                priority=subtask_item.get("priority", "medium"),
+                deadline=subtask_item.get("deadline")
+            )
+            task.subtasks.append(subtask)
             
-            "insights": [
-                "First insight about their productivity patterns, phrased in a supportive tone",
-                "Second insight about their task completion habits, with positive framing",
-                "Third insight about their work patterns, highlighting strengths"
-            ],
-            
-            "suggestions": [
-                "First actionable, gentle suggestion for improvement",
-                "Second actionable suggestion that builds on existing strengths",
-                "Third actionable suggestion with emotional benefit mentioned"
-            ],
-            
-            "motivation": "A heartfelt motivational message that acknowledges their effort and encourages them to keep going",
-            
-            "achievements": [
-                "An achievement they've made based on the data, even if small",
-                "Another achievement that deserves recognition",
-                "A pattern of success worth celebrating"
-            ],
-            
-            "growth_areas": [
-                "A growth opportunity framed in a positive, non-judgmental way",
-                "Another area for development presented as an exciting possibility"
-            ]
-        }}
+        # Generate emotional support message
+        task.emotional_support = await generate_emotional_support(task_title)
         
-        Important guidelines:
-        - Use a warm, supportive, and empathetic tone throughout
-        - Focus on effort and progress rather than just outcomes
-        - Acknowledge both achievements and areas for growth
-        - Emphasize that productivity is personal and everyone works differently
-        - Validate their efforts regardless of completion rates
-        - Offer concrete but gentle suggestions that consider emotional wellbeing
-        - Identify specific achievements to celebrate, no matter how small
-        - Frame growth areas as exciting opportunities rather than deficiencies
-        - Inject positivity, but be authentic rather than overly cheerful
-        - Respond with ONLY the JSON, no explanations or other text
-        """}
-        ]
-        
-        # Call OpenAI API
-        logging.info("Calling OpenAI API for statistics analysis")
-        response = await llm.ainvoke(messages)
-        
-        # Extract content from the AIMessage
-        generated_text = response.content if hasattr(response, 'content') else str(response)
-        logging.info("Received response from OpenAI API")
-        
-        # Parse the JSON from the generated text
-        try:
-            feedback_data = json.loads(generated_text)
-            # Cache the successful response
-            FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
-            return feedback_data
-        except json.JSONDecodeError:
-            # If the model didn't return valid JSON, try to extract JSON portion
-            try:
-                # Look for JSON-like content between curly braces
-                json_start = generated_text.find("{")
-                json_end = generated_text.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = generated_text[json_start:json_end]
-                    feedback_data = json.loads(json_str)
-                    # Cache the successful response
-                    FEEDBACK_CACHE[cache_key] = (feedback_data, time.time())
-                    return feedback_data
-            except:
-                logging.error(f"Failed to parse AI response as JSON: {generated_text}")
-                service_error_feedback = {
-                    "summary": "AI Analysis Service Error",
-                    "insights": [
-                        "The AI service returned an invalid response",
-                        "Please try again later",
-                        "Contact support if the issue persists"
-                    ],
-                    "suggestions": [
-                        "Try refreshing the page",
-                        "Check your internet connection",
-                        "Contact support if the issue persists"
-                    ],
-                    "motivation": "Remember that productivity tools are meant to serve you, not the other way around. Your worth is not measured by these statistics.",
-                    "achievements": [],
-                    "growth_areas": []
-                }
-                FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
-                return service_error_feedback
-                
+        # Save the task to MongoDB
+        task_dict = task.dict()
+        await db.tasks.insert_one(task_dict)
+        return task
     except Exception as e:
-        logging.error(f"OpenAI API request failed: {str(e)}")
-        service_error_feedback = {
-            "summary": "AI Analysis Service Error",
-            "insights": [
-                "The AI service encountered an error",
-                f"Error details: {str(e)}",
-                "Please try again later"
-            ],
-            "suggestions": [
-                "Check your internet connection",
-                "Verify the AI service is running",
-                "Contact support if the issue persists"
-            ],
-            "motivation": "Even when technology fails, your productivity journey continues. Take this moment to reflect on what you've accomplished without an AI telling you.",
-            "achievements": [],
-            "growth_areas": []
-        }
-        FEEDBACK_CACHE[cache_key] = (service_error_feedback, time.time())
-        return service_error_feedback
-
-
-@api_router.get("/statistics/user/{user_id}/feedback", response_model=AIFeedback)
-async def get_user_statistics_feedback(user_id: str):
-    """Get AI-generated feedback based on user's task statistics"""
-    try:
-        # Verify user exists
-        user = await db.users.find_one({"id": user_id})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        # Get user's statistics
-        stats = await get_user_statistics(user_id)
-        
-        # Get user's tasks for additional context
-        tasks = await get_user_tasks(user_id)
-        
-        # Generate AI feedback
-        feedback = await analyze_statistics_with_llm(stats, tasks)
-        
-        return feedback
-    except Exception as e:
-        logging.error(f"Error generating feedback: {str(e)}", exc_info=True)
-        # Return error feedback
-        return {
-            "summary": "Error Generating AI Analysis",
-            "insights": [
-                "An unexpected error occurred",
-                f"Error details: {str(e)}",
-                "Please try again later"
-            ],
-            "suggestions": [
-                "Check the backend logs for more information",
-                "Try refreshing the page",
-                "Contact support if the issue persists"
-            ]
-        }
-
+        logging.error(f"Error processing task: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -1603,3 +1552,75 @@ app.include_router(api_router)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+def get_chat_history(user_id, limit=10):
+    """Get chat history for a user with specified limit"""
+    user_messages = [msg for msg in chat_messages if msg.user_id == user_id]
+    return user_messages[-limit:] if limit > 0 else user_messages
+
+async def get_openai_chat_response(messages):
+    """
+    Get a response from OpenAI chat API
+    
+    Args:
+        messages: List of message objects with role and content keys
+    
+    Returns:
+        Response from OpenAI API
+    """
+    if not OPENAI_API_KEY:
+        logging.error("OpenAI API key is not configured")
+        raise ValueError("OpenAI API key is not configured")
+
+    try:
+        logging.info("Calling OpenAI Chat API")
+        # Initialize OpenAI Chat model
+        chat_model = ChatOpenAI(
+            model="gpt-4o",  # Use appropriate model
+            temperature=0.7,
+            max_tokens=1024,
+            openai_api_key=OPENAI_API_KEY
+        )
+        
+        # Create message objects for the LangChain API
+        message_objs = []
+        for msg in messages:
+            if msg["role"] == "system":
+                message_objs.append(SystemMessage(content=msg["content"]))
+            elif msg["role"] == "user":
+                message_objs.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                message_objs.append(AIMessage(content=msg["content"]))
+        
+        # Call the AI model and get response content
+        response = await chat_model.ainvoke(message_objs)
+        response_content = response.content if hasattr(response, 'content') else str(response)
+        
+        # Create a response object that mimics the OpenAI API structure
+        return {"choices": [{"message": {"content": response_content}}]}
+    except Exception as e:
+        logging.error(f"Error calling OpenAI Chat API: {str(e)}")
+        raise
+
+# Add a new endpoint for chat history
+@api_router.get("/chat/history/{user_id}")
+async def get_chat_history_for_user(user_id: str):
+    """Get chat history for a specific user"""
+    try:
+        # Retrieve chat history from database
+        db_chat_history = await db.chat_history.find_one({"user_id": user_id})
+        if not db_chat_history:
+            # Return empty history if none exists
+            return {"user_id": user_id, "messages": []}
+        
+        # Return the chat history
+        return {
+            "user_id": user_id, 
+            "messages": db_chat_history.get("messages", [])
+        }
+    except Exception as e:
+        logging.error(f"Error retrieving chat history: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve chat history: {str(e)}"
+        )

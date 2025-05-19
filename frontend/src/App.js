@@ -118,10 +118,18 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
   const messagesEndRef = useRef(null);
   
   // Chat with LLM directly from task input
-  const [isChatMode, setIsChatMode] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const chatContainerRef = useRef(null);
+  
+  // Task preview state
+  const [taskPreview, setTaskPreview] = useState(null);
+  const [showTaskPreview, setShowTaskPreview] = useState(false);
+  const [taskConfirmationMode, setTaskConfirmationMode] = useState(false);
+  const [editingSubtask, setEditingSubtask] = useState(null);
+  
+  // Unified interface - always using chat mode but with task awareness
+  const [unifiedMode, setUnifiedMode] = useState(true);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -130,7 +138,7 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-  
+
   // Fetch chat history when component mounts
   useEffect(() => {
     const fetchChatHistory = async () => {
@@ -162,16 +170,18 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
-
-  const toggleChatMode = () => {
-    setIsChatMode(!isChatMode);
-    setTaskText(""); // Clear text when switching modes
-  };
+  
+  // Reset task preview when confirmation mode changes
+  useEffect(() => {
+    if (!taskConfirmationMode) {
+      setTaskPreview(null);
+      setShowTaskPreview(false);
+      setEditingSubtask(null);
+    }
+  }, [taskConfirmationMode]);
   
   const handleChatSubmit = async (e) => {
     e.preventDefault();
-    
-    console.log("Submit pressed. Current taskText:", taskText, "Trimmed length:", taskText.trim().length);
     
     if (!taskText.trim()) {
       return;
@@ -196,11 +206,35 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
         user_id: userId
       });
       
-      // Add AI response to chat
+      // Check if the response contains a task preview
+      const taskPreviewRegex = /```task-preview([\s\S]*?)```/;
+      const match = response.data.response.match(taskPreviewRegex);
+      
+      let aiResponseText = response.data.response;
+      
+      if (match) {
+        try {
+          // Extract and parse the task preview JSON
+          const previewJson = match[1].trim();
+          const taskData = JSON.parse(previewJson);
+          
+          // Remove the task preview code block from the response
+          aiResponseText = aiResponseText.replace(match[0], '');
+          
+          // Set task preview state
+          setTaskPreview(taskData);
+          setShowTaskPreview(true);
+          setTaskConfirmationMode(true);
+        } catch (jsonError) {
+          console.error("Error parsing task preview:", jsonError);
+        }
+      }
+      
+      // Add AI response to chat (without the task preview code block)
       const aiMessage = {
         id: Date.now() + 1,
         type: 'ai',
-        text: response.data.response,
+        text: aiResponseText.trim(),
         timestamp: new Date()
       };
       
@@ -229,6 +263,144 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
     } finally {
       setIsLoadingChat(false);
     }
+  };
+  
+  // Function to confirm and create the task
+  const handleTaskConfirmation = async () => {
+    if (!taskPreview) return;
+    
+    setIsLoadingChat(true);
+    
+    try {
+      // Create the task using the preview data
+      const response = await axios.post(`${API}/process-task`, {
+        text: taskPreview.title,
+        user_id: userId,
+        task_data: taskPreview // Pass the entire preview for structured creation
+      });
+      
+      // Add confirmation message
+      const confirmationMessage = {
+        id: Date.now(),
+        type: 'ai',
+        text: `✅ Task "${response.data.title}" has been created successfully with ${response.data.subtasks?.length || 0} subtasks.`,
+        timestamp: new Date(),
+        task: response.data
+      };
+      
+      setChatMessages(prev => [...prev, confirmationMessage]);
+      
+      // Update tasks list
+      setTasks(prevTasks => [response.data, ...prevTasks]);
+      await fetchTasks();
+      
+      // Reset confirmation mode
+      setTaskConfirmationMode(false);
+      setShowTaskPreview(false);
+      setTaskPreview(null);
+      
+    } catch (err) {
+      console.error("Error creating task:", err);
+      
+      // Add error message
+      const errorMessage = {
+        id: Date.now(),
+        type: 'ai',
+        text: "Sorry, I couldn't create that task. Please try again.",
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoadingChat(false);
+    }
+  };
+  
+  // Function to edit task preview before creation
+  const updateTaskPreview = (field, value) => {
+    if (!taskPreview) return;
+    
+    setTaskPreview(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+  
+  // Function to edit a subtask in the preview
+  const updateSubtaskPreview = (index, field, value) => {
+    if (!taskPreview || !taskPreview.subtasks) return;
+    
+    const updatedSubtasks = [...taskPreview.subtasks];
+    updatedSubtasks[index] = {
+      ...updatedSubtasks[index],
+      [field]: value
+    };
+    
+    setTaskPreview(prev => ({
+      ...prev,
+      subtasks: updatedSubtasks
+    }));
+  };
+  
+  // Function to add a new subtask to the preview
+  const addSubtaskToPreview = () => {
+    if (!taskPreview) return;
+    
+    const newSubtask = {
+      description: "",
+      deadline: ""
+    };
+    
+    setTaskPreview(prev => ({
+      ...prev,
+      subtasks: [...(prev.subtasks || []), newSubtask]
+    }));
+    
+    // Set editing to the new subtask
+    setEditingSubtask(taskPreview.subtasks?.length || 0);
+  };
+  
+  // Function to remove a subtask from the preview
+  const removeSubtaskFromPreview = (index) => {
+    if (!taskPreview || !taskPreview.subtasks) return;
+    
+    const updatedSubtasks = taskPreview.subtasks.filter((_, i) => i !== index);
+    
+    setTaskPreview(prev => ({
+      ...prev,
+      subtasks: updatedSubtasks
+    }));
+    
+    if (editingSubtask === index) {
+      setEditingSubtask(null);
+    }
+  };
+  
+  // Function to cancel task creation
+  const cancelTaskCreation = () => {
+    setTaskConfirmationMode(false);
+    setShowTaskPreview(false);
+    setTaskPreview(null);
+    
+    // Add a message indicating the cancel
+    const cancelMessage = {
+      id: Date.now(),
+      type: 'user',
+      text: "I'd like to cancel this task creation.",
+      timestamp: new Date()
+    };
+    
+    setChatMessages(prev => [...prev, cancelMessage]);
+    
+    // AI response
+    const aiResponse = {
+      id: Date.now() + 1,
+      type: 'ai',
+      text: "No problem! The task creation has been cancelled. Is there anything else I can help you with?",
+      timestamp: new Date()
+    };
+    
+    setChatMessages(prev => [...prev, aiResponse]);
   };
 
   useEffect(() => {
@@ -285,76 +457,8 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!taskText.trim()) {
-      setError("Please enter a task");
-      return;
-    }
-
-    // Stop recording if active
-    if (isListening) {
-      recognition.current?.stop();
-      setIsListening(false);
-      setInterimTranscript('');
-    }
-    
-    // Add user message
-    const userMessage = {
-      id: Date.now(),
-      text: taskText,
-      type: 'user'
-    };
-    setMessages(prev => [...prev, userMessage]);
-    
-    // Clear input immediately after sending
-    setTaskText("");
-    setInterimTranscript('');
-    
-    setProcessing(true);
-    setError("");
-    
-    try {
-      const response = await axios.post(`${API}/process-task`, {
-        text: taskText,
-        user_id: userId
-      });
-      
-      // Add assistant message
-      const assistantMessage = {
-        id: Date.now() + 1,
-        text: `✨ Task created: ${response.data.title}`,
-        type: 'assistant',
-        task: response.data
-      };
-      setMessages(prev => [...prev, assistantMessage]);
-      
-      // Update tasks state immediately with the new task
-      setTasks(prevTasks => [response.data, ...prevTasks]);
-      
-      // Call parent fetchTasks function to ensure parent components are updated
-      await fetchTasks();
-      
-      console.log("Task created successfully:", response.data);
-    } catch (err) {
-      console.error("Error processing task:", err);
-      setError("Failed to process task. Please try again.");
-      
-      // Add error message
-      const errorMessage = {
-        id: Date.now() + 1,
-        text: "Sorry, I couldn't create that task. Please try again.",
-        type: 'error'
-      };
-      setMessages(prev => [...prev, errorMessage]);
-      // Check if the error is due to the AI model not working
-      if (err.response && err.response.status === 503) {
-        setError("The AI model is currently unavailable. The 'Create Task' function is not available at this time.");
-      }
-    } finally {
-      setProcessing(false);
-    }
+  const handleTaskSuggestionClick = (suggestion) => {
+    setTaskText(suggestion);
   };
 
   return (
@@ -376,427 +480,368 @@ const TaskInput = ({ userId, setTasks, fetchTasks }) => {
       <div className="flex-shrink-0 p-5 rounded-t-2xl glass-header">
         <div className="flex items-center space-x-4 mb-3">
           <div className="p-3 rounded-xl shadow-lg modern-icon">
-            {isChatMode ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-            )}
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+            </svg>
           </div>
           <div>
             <h2 className="text-xl font-bold text-white">
-              {isChatMode ? "Chat Assistant" : "Create Task"}
+              Virtual Assistant
             </h2>
             <p className="text-white/70 text-sm font-light">
-              {isChatMode ? "Ask questions or get help" : "Create a new task"}
+              Chat or create tasks
             </p>
           </div>
         </div>
-        <div className="flex justify-end">
-          <button 
-            onClick={toggleChatMode}
-            className="flex items-center bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full text-sm text-white transition-all duration-300"
-          >
-            <span className="mr-2">{isChatMode ? "Switch to Task Mode" : "Switch to Chat Mode"}</span>
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-            </svg>
-          </button>
-        </div>
       </div>
 
-      {/* Content Area - Different depending on mode */}
-      {isChatMode ? (
-        <>
-          {/* Chat Mode Content */}
-          <div 
-            className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar chat-container" 
-            ref={chatContainerRef}
-          >
-            {chatMessages.length === 0 ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center px-6 py-8 rounded-2xl empty-state">
-                  <div className="mb-5 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-full mx-auto w-20 h-20 flex items-center justify-center shadow-inner">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-semibold text-gray-800 mb-2">Start a conversation</h3>
-                  <p className="text-gray-600 mb-4">Chat with your AI assistant to get help with tasks or ask questions</p>
-                  <div className="mt-5 space-y-3">
-                    <div className="suggestion-item rounded-xl px-4 py-3 flex items-center text-gray-700">
-                      <span className="mr-2">☀️</span> How's the weather today?
-                    </div>
-                    <div className="suggestion-item rounded-xl px-4 py-3 flex items-center text-gray-700">
-                      <span className="mr-2">✅</span> Create a shopping list
-                    </div>
-                    <div className="suggestion-item rounded-xl px-4 py-3 flex items-center text-gray-700">
-                      <span className="mr-2">📝</span> Draft an email
-                    </div>
-                  </div>
+      {/* Chat Content Area */}
+      <div 
+        className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar chat-container" 
+        ref={chatContainerRef}
+      >
+        {chatMessages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center px-6 py-8 rounded-2xl empty-state">
+              <div className="mb-5 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-full mx-auto w-20 h-20 flex items-center justify-center shadow-inner">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">Start a conversation</h3>
+              <p className="text-gray-600 mb-4">Chat with me to create tasks or get help with anything</p>
+              <div className="mt-5 space-y-3">
+                <div 
+                  className="suggestion-item rounded-xl px-4 py-3 flex items-center text-gray-700 cursor-pointer"
+                  onClick={() => handleTaskSuggestionClick("Create a task to plan my vacation next month")}
+                >
+                  <span className="mr-2">✅</span> Create a task to plan my vacation
+                </div>
+                <div 
+                  className="suggestion-item rounded-xl px-4 py-3 flex items-center text-gray-700 cursor-pointer"
+                  onClick={() => handleTaskSuggestionClick("I need to organize a team meeting for next week")}
+                >
+                  <span className="mr-2">📅</span> Organize a team meeting
+                </div>
+                <div 
+                  className="suggestion-item rounded-xl px-4 py-3 flex items-center text-gray-700 cursor-pointer"
+                  onClick={() => handleTaskSuggestionClick("Help me break down my project into manageable tasks")}
+                >
+                  <span className="mr-2">📝</span> Break down a project
                 </div>
               </div>
-            ) : (
-              chatMessages.map(message => (
-                <div 
-                  key={message.id} 
-                  className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}
-                >
-                  {message.type !== 'user' && (
-                    <div className="w-8 h-8 rounded-full ai-avatar flex-shrink-0 mr-2 flex items-center justify-center shadow-md">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                      </svg>
-                    </div>
-                  )}
-                  <div 
-                    className={`max-w-[75%] shadow-lg ${
-                      message.type === 'user' 
-                        ? 'chat-message-user bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-2xl rounded-tr-none px-5 py-3.5' 
-                        : 'chat-message-ai bg-white rounded-2xl rounded-tl-none px-5 py-3.5 border border-gray-100'
-                    }`}
-                    style={{
-                      boxShadow: message.type === 'user' 
-                        ? '0 4px 20px -5px rgba(79, 70, 229, 0.4)' 
-                        : '0 4px 20px -5px rgba(0, 0, 0, 0.1)'
-                    }}
-                  >
-                    <p 
-                      className="text-sm whitespace-pre-wrap markdown-content leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: message.type === 'user' ? message.text : renderMarkdown(message.text) }}
-                    ></p>
-                    <div className={`text-right mt-1.5 ${message.type === 'user' ? 'text-blue-100' : 'text-gray-400'}`}>
-                      <span className="text-xs font-light">
-                        {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                      </span>
-                    </div>
-                  </div>
-                  {message.type === 'user' && (
-                    <div className="w-8 h-8 rounded-full user-avatar flex-shrink-0 ml-2 flex items-center justify-center shadow-md">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                      </svg>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-            {isLoadingChat && (
-              <div className="flex justify-start animate-fade-in-up">
+            </div>
+          </div>
+        ) : (
+          chatMessages.map(message => (
+            <div 
+              key={message.id} 
+              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}
+            >
+              {message.type !== 'user' && (
                 <div className="w-8 h-8 rounded-full ai-avatar flex-shrink-0 mr-2 flex items-center justify-center shadow-md">
                   <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                   </svg>
                 </div>
-                <div className="bg-white shadow-lg rounded-2xl rounded-tl-none px-5 py-3.5 border border-gray-100">
-                  <div className="flex items-center space-x-2">
-                    <div className="typing-indicator">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                    <span className="text-sm text-gray-500">AI is thinking...</span>
+              )}
+              <div 
+                className={`max-w-[75%] shadow-lg ${
+                  message.type === 'user' 
+                    ? 'chat-message-user bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-2xl rounded-tr-none px-5 py-3.5' 
+                    : 'chat-message-ai bg-white rounded-2xl rounded-tl-none px-5 py-3.5 border border-gray-100'
+                }`}
+                style={{
+                  boxShadow: message.type === 'user' 
+                    ? '0 4px 20px -5px rgba(79, 70, 229, 0.4)' 
+                    : '0 4px 20px -5px rgba(0, 0, 0, 0.1)'
+                }}
+              >
+                <p 
+                  className="text-sm whitespace-pre-wrap markdown-content leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: message.type === 'user' ? message.text : renderMarkdown(message.text) }}
+                ></p>
+                {message.task && (
+                  <div className="mt-3 pt-3 border-t border-white/20 text-xs space-y-1">
+                    {message.task.subtasks.length > 0 && (
+                      <p className="font-medium">✓ Created with {message.task.subtasks.length} subtasks</p>
+                    )}
+                    {message.task.deadline && (
+                      <p className="font-medium">📅 Due: {formatDate(message.task.deadline)}</p>
+                    )}
                   </div>
+                )}
+                <div className={`text-right mt-1.5 ${message.type === 'user' ? 'text-blue-100' : 'text-gray-400'}`}>
+                  <span className="text-xs font-light">
+                    {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  </span>
                 </div>
+              </div>
+              {message.type === 'user' && (
+                <div className="w-8 h-8 rounded-full user-avatar flex-shrink-0 ml-2 flex items-center justify-center shadow-md">
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                  </svg>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+        
+        {/* Task Preview Section */}
+        {showTaskPreview && taskPreview && (
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-5 border border-indigo-100 shadow-sm animate-fade-in-up">
+            <h3 className="text-lg font-medium text-indigo-900 mb-4 flex items-center">
+              <svg className="w-5 h-5 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Task Preview
+            </h3>
+            
+            <div className="space-y-4">
+              {/* Task Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input 
+                  type="text" 
+                  value={taskPreview.title || ''} 
+                  onChange={(e) => updateTaskPreview('title', e.target.value)}
+                  className="w-full p-2 rounded-md border border-indigo-200 focus:ring-2 focus:ring-indigo-300 focus:border-transparent"
+                />
+              </div>
+              
+              {/* Priority */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                <select 
+                  value={taskPreview.priority || 'medium'} 
+                  onChange={(e) => updateTaskPreview('priority', e.target.value)}
+                  className="w-full p-2 rounded-md border border-indigo-200 focus:ring-2 focus:ring-indigo-300 focus:border-transparent"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              
+              {/* Deadline */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+                <input 
+                  type="datetime-local" 
+                  value={taskPreview.deadline ? formatDateForInput(taskPreview.deadline) : ''} 
+                  onChange={(e) => updateTaskPreview('deadline', e.target.value ? new Date(e.target.value).toISOString() : null)}
+                  className="w-full p-2 rounded-md border border-indigo-200 focus:ring-2 focus:ring-indigo-300 focus:border-transparent"
+                />
+              </div>
+              
+              {/* Subtasks */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-medium text-gray-700">Subtasks</label>
+                  <button 
+                    type="button" 
+                    onClick={addSubtaskToPreview}
+                    className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-100"
+                  >
+                    + Add Subtask
+                  </button>
+                </div>
+                
+                <div className="space-y-2 mt-2">
+                  {taskPreview.subtasks?.map((subtask, index) => (
+                    <div key={index} className="bg-white rounded-md p-3 border border-indigo-100 shadow-sm">
+                      {editingSubtask === index ? (
+                        <>
+                          <div className="mb-2">
+                            <input 
+                              type="text" 
+                              value={subtask.description || ''} 
+                              onChange={(e) => updateSubtaskPreview(index, 'description', e.target.value)}
+                              placeholder="Subtask description"
+                              className="w-full p-2 rounded-md border border-indigo-200 focus:ring-2 focus:ring-indigo-300 focus:border-transparent text-sm"
+                            />
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <input 
+                              type="datetime-local" 
+                              value={subtask.deadline ? formatDateForInput(subtask.deadline) : ''} 
+                              onChange={(e) => updateSubtaskPreview(index, 'deadline', e.target.value ? new Date(e.target.value).toISOString() : null)}
+                              className="flex-grow p-1.5 rounded-md border border-indigo-200 focus:ring-2 focus:ring-indigo-300 focus:border-transparent text-sm"
+                            />
+                            <button 
+                              onClick={() => setEditingSubtask(null)} 
+                              className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded-md"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="text-sm text-gray-800">{subtask.description || 'No description'}</p>
+                            {subtask.deadline && (
+                              <p className="text-xs text-gray-500">Due: {formatDate(subtask.deadline)}</p>
+                            )}
+                          </div>
+                          <div className="flex space-x-1">
+                            <button 
+                              onClick={() => setEditingSubtask(index)} 
+                              className="text-xs bg-gray-50 text-gray-500 p-1 rounded hover:bg-gray-100"
+                              title="Edit subtask"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                            <button 
+                              onClick={() => removeSubtaskFromPreview(index)} 
+                              className="text-xs bg-red-50 text-red-500 p-1 rounded hover:bg-red-100"
+                              title="Remove subtask"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  
+                  {!taskPreview.subtasks?.length && (
+                    <p className="text-sm text-gray-500 italic">No subtasks defined</p>
+                  )}
+                </div>
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="flex justify-between pt-2">
+                <button 
+                  onClick={cancelTaskCreation}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors duration-200"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleTaskConfirmation}
+                  className="px-4 py-2 bg-gradient-to-r from-indigo-500 to-blue-500 text-white rounded-md hover:from-indigo-600 hover:to-blue-600 transition-colors duration-200"
+                >
+                  Create Task
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* AI Typing Indicator */}
+        {isLoadingChat && (
+          <div className="flex justify-start animate-fade-in-up">
+            <div className="w-8 h-8 rounded-full ai-avatar flex-shrink-0 mr-2 flex items-center justify-center shadow-md">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+              </svg>
+            </div>
+            <div className="bg-white shadow-lg rounded-2xl rounded-tl-none px-5 py-3.5 border border-gray-100">
+              <div className="flex items-center space-x-2">
+                <div className="typing-indicator">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <span className="text-sm text-gray-500">Thinking...</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {/* Chat Input */}
+      <div className="p-5 border-t border-gray-100">
+        <form onSubmit={handleChatSubmit} className="space-y-4">
+          <div className="relative group">
+            <textarea
+              value={taskText}
+              onChange={(e) => setTaskText(e.target.value)}
+              placeholder={taskConfirmationMode 
+                ? "Review and modify your task above..." 
+                : "Type a message, add a task, or ask for help..."}
+              className="modern-input w-full resize-none focus:outline-none focus:ring-0"
+              rows={3}
+              disabled={taskConfirmationMode}
+            />
+            {interimTranscript && (
+              <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/40 to-white/60 backdrop-blur-sm text-gray-600 italic border-t border-white/20 rounded-b-2xl">
+                {interimTranscript}
               </div>
             )}
           </div>
           
-          {/* Chat Input */}
-          <div className="p-5 border-t border-gray-100">
-            <form onSubmit={handleChatSubmit} className="space-y-4">
-              <div className="relative group">
-                <textarea
-                  value={taskText}
-                  onChange={(e) => {
-                    console.log("Text changed:", e.target.value);
-                    setTaskText(e.target.value);
-                  }}
-                  placeholder="Type your message here..."
-                  className="modern-input w-full resize-none focus:outline-none focus:ring-0"
-                  rows={3}
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              disabled={isLoadingChat || !taskText.trim() || taskConfirmationMode}
+              className="flex-1 gradient-blue-button text-white px-6 py-3.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+            >
+              {isLoadingChat ? (
+                <>
+                  <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                  <span>Send</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={toggleListening}
+              disabled={taskConfirmationMode}
+              className={`p-3.5 rounded-xl transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-center ${
+                isListening
+                  ? 'bg-gradient-to-r from-red-400 to-pink-500 text-white recording-active'
+                  : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700'
+              } ${taskConfirmationMode ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title={isListening ? 'Stop recording' : 'Start voice input'}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
                 />
-                {interimTranscript && (
-                  <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/40 to-white/60 backdrop-blur-sm text-gray-600 italic border-t border-white/20 rounded-b-2xl">
-                    {interimTranscript}
-                  </div>
-                )}
-              </div>
-              
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={isLoadingChat || !taskText.trim()}
-                  className="flex-1 gradient-blue-button text-white px-6 py-3.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-                >
-                  {isLoadingChat ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                      </svg>
-                      <span>Send</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleListening}
-                  className={`p-3.5 rounded-xl transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-center ${
-                    isListening
-                      ? 'bg-gradient-to-r from-red-400 to-pink-500 text-white recording-active'
-                      : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700'
-                  }`}
-                  title={isListening ? 'Stop recording' : 'Start voice input'}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </form>
+              </svg>
+            </button>
           </div>
-        </>
-      ) : (
-        <>
-          {/* Task Creation Mode Content */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar chat-container">
-            {/* Messages Area */}
-            <div className="space-y-4">
-              {messages.map(message => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}
-                >
-                  {message.type !== 'user' && (
-                    <div className="avatar ai-avatar mr-2">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                      </svg>
-                    </div>
-                  )}
-                  <div
-                    className={`max-w-[75%] shadow-lg ${
-                      message.type === 'user' 
-                        ? 'chat-message-user bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-2xl rounded-tr-none px-5 py-3.5' 
-                        : message.type === 'error'
-                        ? 'bg-gradient-to-br from-red-100 to-pink-100 text-red-700 rounded-2xl rounded-tl-none px-5 py-3.5 border border-red-200'
-                        : 'chat-message-ai bg-white rounded-2xl rounded-tl-none px-5 py-3.5 border border-gray-100'
-                    }`}
-                    style={{
-                      boxShadow: message.type === 'user' 
-                        ? '0 4px 20px -5px rgba(79, 70, 229, 0.4)' 
-                        : message.type === 'error'
-                        ? '0 4px 20px -5px rgba(251, 113, 133, 0.2)'
-                        : '0 4px 20px -5px rgba(0, 0, 0, 0.1)'
-                    }}
-                  >
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.text}</p>
-                    {message.task && (
-                      <div className="mt-3 pt-3 border-t border-white/20 text-xs space-y-1">
-                        {message.task.subtasks.length > 0 && (
-                          <p className="font-medium">✓ Created with {message.task.subtasks.length} subtasks</p>
-                        )}
-                        {message.task.deadline && (
-                          <p className="font-medium">📅 Due: {formatDate(message.task.deadline)}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  {message.type === 'user' && (
-                    <div className="avatar user-avatar ml-2">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                      </svg>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {processing && (
-                <div className="flex justify-start animate-fade-in-up">
-                  <div className="avatar ai-avatar mr-2">
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                    </svg>
-                  </div>
-                  <div className="bg-white shadow-lg rounded-2xl rounded-tl-none px-5 py-3.5 border border-gray-100">
-                    <div className="flex items-center space-x-2">
-                      <div className="typing-indicator">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                      </div>
-                      <span className="text-sm text-gray-500">Creating your task...</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            <div className="bg-white/50 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-white/20">
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-3 text-gray-800">
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                    </svg>
-                    <h3 className="text-lg font-medium">Create a New Task</h3>
-                  </div>
-                  
-                  <div className="relative group">
-                    <textarea
-                      id="taskInput"
-                      value={taskText}
-                      onChange={(e) => setTaskText(e.target.value)}
-                      placeholder="Describe your task in natural language..."
-                      className="modern-input w-full resize-none focus:outline-none focus:ring-0"
-                      rows={4}
-                    />
-                    {interimTranscript && (
-                      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-b from-white/40 to-white/60 backdrop-blur-sm text-gray-600 italic border-t border-white/20 rounded-b-2xl">
-                        {interimTranscript}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="flex gap-3">
-                  <button
-                    type="submit"
-                    disabled={processing}
-                    className="flex-1 gradient-blue-button text-white px-6 py-3.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-                  >
-                    {processing ? (
-                      <>
-                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span>Processing...</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-                        </svg>
-                        <span>Create Task</span>
-                      </>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={toggleListening}
-                    className={`p-3.5 rounded-xl transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-center ${
-                      isListening
-                        ? 'bg-gradient-to-r from-red-400 to-pink-500 text-white recording-active'
-                        : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700'
-                    }`}
-                    title={isListening ? 'Stop recording' : 'Start voice input'}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </form>
-              
-              {isListening && (
-                <div className="mt-4 bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100 animate-pulse">
-                  <div className="flex items-center text-green-700">
-                    <div className="relative mr-3">
-                      <div className="absolute -inset-1 bg-green-400 rounded-full animate-ping opacity-30"></div>
-                      <div className="relative h-3 w-3 bg-green-500 rounded-full"></div>
-                    </div>
-                    <span className="font-medium">Listening... Speak now</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-6">
-                <h3 className="text-md font-semibold text-gray-800 mb-3 flex items-center">
-                  <svg className="h-4 w-4 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-                  </svg>
-                  Try these examples
-                </h3>
-                <div className="grid grid-cols-1 gap-3 mt-2">
-                  <div 
-                    className="suggestion-card bg-white rounded-xl p-3 shadow-sm border border-gray-100 cursor-pointer"
-                    onClick={() => setTaskText("Schedule a team meeting for next Monday at 10am with the marketing team to discuss Q4 strategy")}
-                  >
-                    <div className="flex items-start">
-                      <span className="text-blue-500 mr-2">📅</span>
-                      <div>
-                        <p className="text-gray-800 font-medium text-sm">Schedule team meeting</p>
-                        <p className="text-xs text-gray-500 mt-1">Monday at 10am with marketing team</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div 
-                    className="suggestion-card bg-white rounded-xl p-3 shadow-sm border border-gray-100 cursor-pointer"
-                    onClick={() => setTaskText("Complete the quarterly report by Friday. High priority. Need to analyze sales data and prepare presentation slides.")}
-                  >
-                    <div className="flex items-start">
-                      <span className="text-red-500 mr-2">⚡</span>
-                      <div>
-                        <p className="text-gray-800 font-medium text-sm">Complete quarterly report</p>
-                        <p className="text-xs text-gray-500 mt-1">High priority, due Friday</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div 
-                    className="suggestion-card bg-white rounded-xl p-3 shadow-sm border border-gray-100 cursor-pointer"
-                    onClick={() => setTaskText("Buy groceries: milk, eggs, bread, fruits, and vegetables. Try to get this done by tomorrow evening.")}
-                  >
-                    <div className="flex items-start">
-                      <span className="text-green-500 mr-2">🛒</span>
-                      <div>
-                        <p className="text-gray-800 font-medium text-sm">Buy groceries</p>
-                        <p className="text-xs text-gray-500 mt-1">Milk, eggs, bread, fruits, vegetables</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+        </form>
+        
+        {isListening && (
+          <div className="mt-4 bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100 animate-pulse">
+            <div className="flex items-center text-green-700">
+              <div className="relative mr-3">
+                <div className="absolute -inset-1 bg-green-400 rounded-full animate-ping opacity-30"></div>
+                <div className="relative h-3 w-3 bg-green-500 rounded-full"></div>
               </div>
+              <span className="font-medium">Listening... Speak now</span>
             </div>
           </div>
-        </>
-      )}
+        )}
+      </div>
 
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar {
@@ -1070,7 +1115,7 @@ const TasksList = ({ userId }) => {
   useEffect(() => {
     if (userId) {
       console.log("Fetching tasks for user:", userId);
-      fetchTasks();
+    fetchTasks();
     }
   }, [userId, lastRefresh]);
 
@@ -1820,13 +1865,13 @@ function App() {
   useEffect(() => {
     const setupDefaultUser = async () => {
       const defaultUsername = "default-user";
-      
+
       try {
         // First try to get the existing user
         let response = await axios.get(`${API}/users/name/${defaultUsername}`);
         setUserId(response.data.id);
-      } catch (err) {
-        if (err.response && err.response.status === 404) {
+        } catch (err) {
+          if (err.response && err.response.status === 404) {
           // If user doesn't exist, create one
           try {
             const createResponse = await axios.post(`${API}/users`, { username: defaultUsername });
@@ -1835,10 +1880,10 @@ function App() {
             console.error("Error creating user:", createErr);
             setError("Failed to initialize user. Please try again.");
           }
-        } else {
+          } else {
           console.error("Error getting user:", err);
           setError("Failed to initialize user. Please try again.");
-        }
+          }
       } finally {
         setLoading(false);
       }
@@ -1860,26 +1905,26 @@ function App() {
     } catch (err) {
       console.error("Error fetching tasks:", err);
       setError("Failed to load tasks. Please try again.");
-    } finally {
+      } finally {
       setLoading(false);
-    }
-  };
-  
+      }
+    };
+
   // Function to refresh tasks state across components
   const refreshAllTasks = () => {
     console.log("App: refreshAllTasks triggered");
     setTasksLastRefresh(Date.now());
     fetchTasks();
   };
-  
+
   // When user changes or tasksLastRefresh changes, fetch their tasks
   useEffect(() => {
     if (userId) {
       console.log("App: Fetching tasks after user/refresh change");
-      fetchTasks();
+    fetchTasks();
     }
   }, [userId, tasksLastRefresh]);
-  
+
   if (loading && !userId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -1890,7 +1935,7 @@ function App() {
       </div>
     );
   }
-  
+
   if (error && !userId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
