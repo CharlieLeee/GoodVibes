@@ -1,0 +1,6 @@
+{
+  "TOGETHER_API_KEY": "your_together_api_key_here",
+  "OTHER_API_KEYS": {
+    "comment": "Add any other API keys here as needed"
+  }
+} 
